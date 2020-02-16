@@ -10,7 +10,7 @@
 #ifdef BAZEL_BUILD
 #include "examples/protos/helloworld.grpc.pb.h"
 #else
-#include "build/ConsistentHash.grpc.pb.h"
+#include "pb/ConsistentHash.grpc.pb.h"
 #endif
 
 #include "MyUtils/cpp/fileOp.h"

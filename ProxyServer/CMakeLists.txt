@@ -29,7 +29,7 @@ endif()
 
 ###
 # include externalproject 
-include(external_modules/CMakeLists.txt)
+include(../external_modules/CMakeLists.txt)
 
 
 # This branch assumes that gRPC and all its dependencies are already installed
@@ -41,7 +41,7 @@ set(protobuf_MODULE_COMPATIBLE TRUE)
 find_package(Protobuf REQUIRED)
 message(STATUS "Using protobuf ${protobuf_VERSION}")
 
-include_directories(MyUtils/cpp)
+include_directories(../MyUtils/cpp)
 file(GLOB utils "MyUtils/cpp/*.cpp")
 # message(STATUS ${utils})
 
@@ -57,14 +57,14 @@ set(_GRPC_GRPCPP_UNSECURE gRPC::grpc++_unsecure)
 set(_GRPC_CPP_PLUGIN_EXECUTABLE $<TARGET_FILE:gRPC::grpc_cpp_plugin>)
 
 # Proto file
-get_filename_component(hw_proto "proto/ConsistentHash.proto" ABSOLUTE)
+get_filename_component(hw_proto "../proto/ProxyServer.proto" ABSOLUTE)
 get_filename_component(hw_proto_path "${hw_proto}" PATH)
 
 # Generated sources
-get_filename_component(hw_proto_srcs "${CMAKE_CURRENT_BINARY_DIR}/../pb/ConsistentHash.pb.cc" ABSOLUTE)
-set(hw_proto_hdrs "${CMAKE_CURRENT_BINARY_DIR}/../pb/ConsistentHash.pb.h")
-set(hw_grpc_srcs "${CMAKE_CURRENT_BINARY_DIR}/../pb/ConsistentHash.grpc.pb.cc")
-set(hw_grpc_hdrs "${CMAKE_CURRENT_BINARY_DIR}/../pb/ConsistentHash.grpc.pb.h")
+get_filename_component(hw_proto_srcs "${CMAKE_CURRENT_BINARY_DIR}/../pb/ProxyServer.pb.cc" ABSOLUTE)
+set(hw_proto_hdrs "${CMAKE_CURRENT_BINARY_DIR}/../pb/ProxyServer.pb.h")
+set(hw_grpc_srcs "${CMAKE_CURRENT_BINARY_DIR}/../pb/ProxyServer.grpc.pb.cc")
+set(hw_grpc_hdrs "${CMAKE_CURRENT_BINARY_DIR}/../pb/ProxyServer.grpc.pb.h")
 add_custom_command(
       OUTPUT "${hw_proto_srcs}" "${hw_proto_hdrs}" "${hw_grpc_srcs}" "${hw_grpc_hdrs}"
       COMMAND ${_PROTOBUF_PROTOC}
@@ -76,13 +76,15 @@ add_custom_command(
       DEPENDS "${hw_proto}")
 
 # Include generated *.pb.h files
-include_directories("${CMAKE_CURRENT_BINARY_DIR}/build")
 
+set(MyUtils_CPP_Files "../MyUtils/cpp/fileOp.cpp" "../MyUtils/cpp/hash.cpp")
+
+set(target_files "ProxyServer.cpp" "ProxyImpl.cpp")
 # Targets greeter_[async_](client|server)
 foreach(_target
-  client 
+  ProxyServer
   )
-  add_executable(${_target} "${_target}.cc"
+  add_executable(${_target} ${target_files} ${MyUtils_CPP_Files}
     ${hw_proto_srcs}
     ${hw_grpc_srcs} 
     ${utils}

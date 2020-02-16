@@ -24,6 +24,7 @@ package Bicache;
 // The greeting service definition.
 service ConsistentHash{
   // Sends a greeting
+  //rpc HeartBeat(HeartBeatRequest) returns (HeartBeatReply) {}
   rpc HeartBeat(HeartBeatRequest) returns (HeartBeatReply) {}
 }
 

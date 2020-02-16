@@ -1,0 +1,71 @@
+// Copyright 2015 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+syntax = "proto3";
+
+package Bicache;
+
+// The greeting service definition.
+service ProxyServer{
+  // Sends a greeting
+  rpc Register(RegisterRequest) returns (RegisterReply) {}
+  //rpc HeatBeat(ProxyHeartBeatRequest) returns (ProxyHeartBeatRequest) {}
+  //不急着完成
+  //rpc GetConfig(RegisterRequest) returns (RegisterReply) {}
+}
+
+// The request message containing the user's name.
+message RegisterRequest{
+  string ip = 1;
+  string port = 2;
+//  optional range
+//  uint64 range_end = 3;
+//  uint64 total_range= 4;
+}
+
+// The response message containing the greetings
+message RegisterReply{
+  //client 主动防御，超过1s的回复主动放弃，重新 register
+  uint64 timestamp = 1;
+  //the fields below are not used now
+  //现在的 ProxyServer 不需要做loadbalance
+  uint64 range_start = 2;
+  uint64 range_end = 3;
+  uint64 total_range = 4;
+  //end the fields below are not used now
+  string next_node_ip_port = 5;
+  //status&msg
+  uint32 statue = 7;
+  string error = 8;
+  //
+  uint64 pos = 9;
+}
+
+// The request message containing the user's name.
+//message ProxyHeartBeatRequest{
+//  uint64 timestamp = 1;
+//}
+//
+//// The response message containing the greetings
+//message ProxyHeartBeatReply{
+//  uint64 timestamp = 1;
+//}
+
+//message GetConfigRequest{
+//  uint64 timestamp = 1;
+//}
+//
+//message GetConfigReply{
+//  uint64 timestamp = 1;
+//}
