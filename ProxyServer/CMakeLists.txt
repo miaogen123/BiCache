@@ -18,6 +18,7 @@
 # that automatically builds all the dependencies before building helloworld.
 
 cmake_minimum_required(VERSION 2.8)
+cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo ... 
 
 project(Bicache C CXX)
 
@@ -42,7 +43,6 @@ find_package(Protobuf REQUIRED)
 message(STATUS "Using protobuf ${protobuf_VERSION}")
 
 include_directories(../MyUtils/cpp)
-file(GLOB utils "MyUtils/cpp/*.cpp")
 # message(STATUS ${utils})
 
 set(_PROTOBUF_LIBPROTOBUF protobuf::libprotobuf)
@@ -77,17 +77,18 @@ add_custom_command(
 
 # Include generated *.pb.h files
 
-set(MyUtils_CPP_Files "../MyUtils/cpp/fileOp.cpp" "../MyUtils/cpp/hash.cpp")
+set(git_utils "../MyUtils/cpp/fileOp.cpp" "../MyUtils/cpp/hash.cpp")
+file(GLOB local_utils "../utils/*.cpp")
 
 set(target_files "ProxyServer.cpp" "ProxyImpl.cpp")
 # Targets greeter_[async_](client|server)
 foreach(_target
   ProxyServer
   )
-  add_executable(${_target} ${target_files} ${MyUtils_CPP_Files}
+  add_executable(${_target} ${target_files} ${git_utils}
     ${hw_proto_srcs}
     ${hw_grpc_srcs} 
-    ${utils}
+    ${local_utils}
     )
   target_link_libraries(${_target}
     ${_GRPC_GRPCPP_UNSECURE}

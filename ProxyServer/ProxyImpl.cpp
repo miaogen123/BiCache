@@ -22,6 +22,7 @@ ProxyServerImpl::ProxyServerImpl(std::unordered_map<std::string, std::string>& c
             virtual_node_num_ = virtual_node_num;
         }
     }
+    INFO("proxy server working");
 }
 
 Status ProxyServerImpl::Register(ServerContext* context, const RegisterRequest* req, RegisterReply* reply){
@@ -46,6 +47,7 @@ Status ProxyServerImpl::Register(ServerContext* context, const RegisterRequest* 
                 ip_port_hash += port;
                 continue;
             } else {
+                //已经存在的节点，重新加入时，应该如何处理
                 pos2host_.insert({pos, ip_port_origin});
                 host2pos_.insert({ip_port_origin, pos});
                 break;
@@ -61,8 +63,8 @@ Status ProxyServerImpl::Register(ServerContext* context, const RegisterRequest* 
         reply->set_next_node_ip_port(ite_first_pos->second);
     }
     reply->set_total_range(virtual_node_num_);
-    reply->set_total_range(virtual_node_num_);
     reply->set_pos(pos);
+    INFO("receive register: "+ ip+ ":"+port+", get pos:" + std::to_string(pos)+",next host"+ reply->next_node_ip_port());
     return Status::OK;
 } 
     ////需要有数据结构，方便的记录当前的哈希环的拓扑：要考虑动态的删减的情况，
