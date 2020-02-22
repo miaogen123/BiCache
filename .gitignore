@@ -2,3 +2,6 @@ build/
 helloworld/
 MyUtils/
 build_proxy_server/
+.vscode/
+build_ch/
+pb/
