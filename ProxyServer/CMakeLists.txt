@@ -18,7 +18,6 @@
 # that automatically builds all the dependencies before building helloworld.
 
 cmake_minimum_required(VERSION 2.8)
-cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo ... 
 
 project(Bicache C CXX)
 

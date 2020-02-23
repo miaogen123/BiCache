@@ -26,15 +26,28 @@ service ConsistentHash{
   // Sends a greeting
   //rpc HeartBeat(HeartBeatRequest) returns (HeartBeatReply) {}
   rpc HeartBeat(HeartBeatRequest) returns (HeartBeatReply) {}
+  rpc AddNode(AddNodeRequest) returns (AddNodeReply) {}
 }
 
-// The request message containing the user's name.
+message AddNodeRequest{
+  //该节点分配的位置
+  string ip = 1;
+  string port = 2;
+  uint64 pos = 3;
+}
+
+message AddNodeReply{
+  int32 status = 1;
+  uint32 range_start = 2;
+  //deprecated, should not be used any more
+  string msg = 256 ;
+}
+
 message HeartBeatRequest{
   uint64 timestamp = 1;
   string port = 2;
 }
 
-// The response message containing the greetings
 message HeartBeatReply{
   uint64 timestamp = 1;
 }

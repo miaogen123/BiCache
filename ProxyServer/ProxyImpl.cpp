@@ -47,7 +47,7 @@ Status ProxyServerImpl::Register(ServerContext* context, const RegisterRequest* 
                 ip_port_hash += port;
                 continue;
             } else {
-                //已经存在的节点，重新加入时，应该如何处理
+                //FIXME:::已经存在的节点，重新加入时，应该如何处理
                 pos2host_.insert({pos, ip_port_origin});
                 host2pos_.insert({ip_port_origin, pos});
                 break;
