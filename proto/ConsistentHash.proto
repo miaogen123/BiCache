@@ -35,11 +35,17 @@ message AddNodeRequest{
   string port = 2;
   uint64 pos = 3;
 }
+message FingerItem{
+  uint32 start = 1;
+  uint32 interval = 2;
+  uint32 successor = 3;
+}
 
 message AddNodeReply{
   int32 status = 1;
   uint32 range_start = 2;
   //deprecated, should not be used any more
+  repeated FingerItem finger_table =3;
   string msg = 256 ;
 }
 
