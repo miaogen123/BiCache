@@ -17,8 +17,8 @@ using Bicache::RegisterReply;
 using Bicache::AddNodeRequest;
 using Bicache::AddNodeReply;
 
-class CH_node_impl : public Bicache::ConsistentHash::Service {
 
+class CH_node_impl : public Bicache::ConsistentHash::Service {
 public:
     //to communicate with proxyServer 
 
@@ -26,7 +26,9 @@ public:
     CH_node_impl()=delete;
     int register_to_proxy(const std::string& host, const std::string& port);
     Status AddNode(::grpc::ServerContext* context, const ::Bicache::AddNodeRequest* request, ::Bicache::AddNodeReply* reply)override;
+    // run 里面做一些必要的开始工作
     void run();
+    // 需要对外提供一个查询 successor 的接口
 
 private:
     int add_node_req();
@@ -38,9 +40,11 @@ private:
     int range_start_ = 0;
     // cur_pos which is also range_end
     int cur_pos_;
+    int mbit;
     std::string next_ip_port_;
     std::string cur_host_ip_;
     std::string cur_host_port_;
     std::unique_ptr<Bicache::ProxyServer::Stub> proxy_client_;
     std::unique_ptr<Bicache::ConsistentHash::Stub> CH_client_;
+    std::vector<Bicache::FingerItem> finger_table;
 };

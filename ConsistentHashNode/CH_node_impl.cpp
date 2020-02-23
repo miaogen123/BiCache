@@ -1,4 +1,5 @@
 #include <memory>
+#include <cmath>
 #include "CH_node_impl.h"
 
 //to communicate with proxyServer 
@@ -16,6 +17,13 @@ CH_node_impl::CH_node_impl(Conf& conf){
   //TODO:: get local function
   cur_host_ip_ = conf.get("host_ip");
   cur_host_port_ = conf.get("CH_node_port");
+  auto mbit_str = conf.get("mbit", "4");
+  auto to_ret = std::atoi(mbit_str.c_str());
+  if(mbit_str.size()==0||to_ret==0){
+    mbit = 4;
+  }else{
+    mbit = to_ret;
+  }
 }
 
 int CH_node_impl::register_to_proxy(const std::string& host, const std::string& port){
@@ -31,6 +39,16 @@ int CH_node_impl::register_to_proxy(const std::string& host, const std::string& 
     virtual_node_num_ = rsp.total_range();
     if(next_ip_port_ == host+":"+port){
       range_start_ = (cur_pos_ + 1)%virtual_node_num_;
+      //initialize first finger table
+      auto interval_start = range_start_;
+      for(int i=1;i<=mbit;i++){
+        Bicache::FingerItem item;
+        item.set_start(interval_start);
+        item.set_interval(pow(2.0, double(i-1)));
+        item.set_successor(cur_pos_);
+        interval_start = (interval_start + item.interval())%virtual_node_num_;
+        finger_table.push_back(std::move(item));
+      }
     }
     std::string msg = "register OK, "+ std::to_string(range_start_) +" "+ std::to_string(rsp.pos()) + " " \
       + std::to_string(rsp.total_range()) +":"+ rsp.next_node_ip_port();
@@ -64,6 +82,11 @@ Status CH_node_impl::AddNode(::grpc::ServerContext* context, const ::Bicache::Ad
     //TODO:: 这里切分需要注意是原子性的，不能自己范围切了然后对方没有接受到数据。所以需要等对方把数据给切分了以后发送过来一个ack包，自己才停止对外服务
     //这个地方是有一个中间状态的，在这个中间状态需要不对外提供写服务，只提供读服务。
     reply->set_range_start(range_start_);
+    //TODO:: 似乎这里的赋值都只能使用遍历？？？脑阔痛
+    for(int i=0;i<finger_table.size();i++){
+      reply->add_finger_table()->CopyFrom(finger_table[i]);
+    }
+    //reply->mutable_finger_table() = finger_table;
     range_start_ = (pos +1)% virtual_node_num_;
     INFO("add req from:"+ip+":"+port +" :before "+ std::to_string(reply->range_start()) +", after:"+std::to_string(range_start_));
     return {grpc::StatusCode::OK, ""};
@@ -84,6 +107,20 @@ int CH_node_impl::add_node_req(){
   if(status.ok()){
     //TODO:: 这里没有加锁，但这并不意味这里就是安全的，是要考虑的
     range_start_ =reply.range_start();
+    //这里可以确保 add_node_req 不是当前的节点发出的，所以可以安全的更新 finger_table
+    //initialize the finger_table of newcomer node(this parts may be abstracted into a block/function of codes)
+    int i = 0, j = 0; 
+    for(i=0;i<mbit;i++){
+      Bicache::FingerItem item;
+      //TODO::to be accomplished
+//      item.set_start(interval_start);
+//      item.set_interval(pow(2.0, double(i-1)));
+//      item.set_successor(cur_pos_);
+//      interval_start = (interval_start + item.interval())%virtual_node_num_;
+//      finger_table.push_back(std::move(item));
+
+    }
+
     return 0; 
   }
   ERROR(status.error_message());
