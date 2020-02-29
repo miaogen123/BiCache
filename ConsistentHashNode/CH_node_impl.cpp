@@ -46,9 +46,11 @@ int CH_node_impl::register_to_proxy(const std::string& host, const std::string& 
         item.set_start(interval_start);
         item.set_interval(pow(2.0, double(i-1)));
         item.set_successor(cur_pos_);
+        item.set_ip_port(cur_host_ip_+":"+cur_host_port_);
         interval_start = (interval_start + item.interval())%virtual_node_num_;
         finger_table.push_back(std::move(item));
       }
+      pos2host[cur_pos_]=cur_host_ip_+":"+cur_host_port_;
     }
     std::string msg = "register OK, "+ std::to_string(range_start_) +" "+ std::to_string(rsp.pos()) + " " \
       + std::to_string(rsp.total_range()) +":"+ rsp.next_node_ip_port();
@@ -89,9 +91,42 @@ Status CH_node_impl::AddNode(::grpc::ServerContext* context, const ::Bicache::Ad
     //reply->mutable_finger_table() = finger_table;
     range_start_ = (pos +1)% virtual_node_num_;
     INFO("add req from:"+ip+":"+port +" :before "+ std::to_string(reply->range_start()) +", after:"+std::to_string(range_start_));
+    pre_node_ = req->pos();
+    pre_node_ip_port_ = ip+":"+port;
     return {grpc::StatusCode::OK, ""};
   }
 }
+Status CH_node_impl::FindSuccessor(::grpc::ServerContext* context, const ::Bicache::FindSuccRequest* req, ::Bicache::FindSuccReply* reply){
+  int pos = req->pos();
+  //TODO:: 可以先做一个判断看是不是在当前的 range 之内，可以减少一些代价
+//  if(){
+//    reply->found = false;
+//    return {grpc::StatusCode::Aborted, "not in my range"};
+//  }
+  int ret= find_successor(pos, finger_table);
+  if(ret > 0){
+    reply->set_found(true);
+    reply->set_successor(ret);
+    return {grpc::StatusCode::OK, ""};
+  }
+  reply->set_successor((- ret)%virtual_node_num_);
+  reply->set_found(false);
+  return {grpc::StatusCode::ABORTED, "not in my range"};
+}
+
+int CH_node_impl::find_successor(int pos, std::vector<Bicache::FingerItem>& finger_table){
+  for(int i=mbit-1; i>=0;i--){
+    auto& item = finger_table[i-1];
+    if( ((pos + virtual_node_num_) - item.start())% virtual_node_num_ < item.interval()){
+      return pos;
+    }
+  }
+  if(finger_table[mbit-1].successor() ==0 ){
+    return -virtual_node_num_;
+  }
+  return - finger_table[mbit-1].successor();
+}
+
 
 int CH_node_impl::add_node_req(){
   CH_client_ = std::move(std::make_unique<Bicache::ConsistentHash::Stub>(grpc::CreateChannel(
@@ -109,16 +144,27 @@ int CH_node_impl::add_node_req(){
     range_start_ =reply.range_start();
     //这里可以确保 add_node_req 不是当前的节点发出的，所以可以安全的更新 finger_table
     //initialize the finger_table of newcomer node(this parts may be abstracted into a block/function of codes)
-    int i = 0, j = 0; 
-    for(i=0;i<mbit;i++){
+
+    auto interval_start = range_start_;
+    std::vector<Bicache::FingerItem> finger_table;
+    for(int i=0;i<reply.finger_table_size();i++){
+      finger_table.push_back(std::move(*reply.mutable_finger_table(i)));
+    }
+    for(int i=0;i<mbit;i++){
       Bicache::FingerItem item;
       //TODO::to be accomplished
-//      item.set_start(interval_start);
-//      item.set_interval(pow(2.0, double(i-1)));
-//      item.set_successor(cur_pos_);
+      item.set_start(interval_start);
+      item.set_interval(pow(2.0, double(i-1)));
+      auto item_upper = interval_start + pow(2.0, double(i-1));
+      //find the closest one 
+      auto ret = find_successor(item_upper, finger_table);
+      if(ret>0){
+        //进行直接拿到
+      }else{
+
+      }
 //      interval_start = (interval_start + item.interval())%virtual_node_num_;
 //      finger_table.push_back(std::move(item));
-
     }
 
     return 0; 
@@ -126,6 +172,8 @@ int CH_node_impl::add_node_req(){
   ERROR(status.error_message());
   return -1;
 }
+
+
 
 void CH_node_impl::run(){
   
