@@ -20,7 +20,7 @@ package Bicache;
 service ProxyServer{
   // Sends a greeting
   rpc Register(RegisterRequest) returns (RegisterReply) {}
-  //rpc HeatBeat(ProxyHeartBeatRequest) returns (ProxyHeartBeatRequest) {}
+  rpc HeartBeat(ProxyHeartBeatRequest) returns (ProxyHeartBeatReply) {}
   //不急着完成
   //rpc GetConfig(RegisterRequest) returns (RegisterReply) {}
 }
@@ -53,14 +53,15 @@ message RegisterReply{
 }
 
 // The request message containing the user's name.
-//message ProxyHeartBeatRequest{
-//  uint64 timestamp = 1;
-//}
-//
-//// The response message containing the greetings
-//message ProxyHeartBeatReply{
-//  uint64 timestamp = 1;
-//}
+message ProxyHeartBeatRequest{
+  uint32 pos = 1;
+  uint64 timestamp = 2;
+}
+
+// The response message containing the greetings
+message ProxyHeartBeatReply{
+  uint64 timestamp = 1;
+}
 
 //message GetConfigRequest{
 //  uint64 timestamp = 1;

@@ -46,9 +46,11 @@ int CH_node_impl::register_to_proxy(const std::string& host, const std::string& 
         item.set_start(interval_start);
         item.set_interval(pow(2.0, double(i-1)));
         item.set_successor(cur_pos_);
+        item.set_ip_port(cur_host_ip_+":"+cur_host_port_);
         interval_start = (interval_start + item.interval())%virtual_node_num_;
-        finger_table.push_back(std::move(item));
+        finger_table_.push_back(std::move(item));
       }
+      pos2host_[cur_pos_]=cur_host_ip_+":"+cur_host_port_;
     }
     std::string msg = "register OK, "+ std::to_string(range_start_) +" "+ std::to_string(rsp.pos()) + " " \
       + std::to_string(rsp.total_range()) +":"+ rsp.next_node_ip_port();
@@ -60,6 +62,8 @@ int CH_node_impl::register_to_proxy(const std::string& host, const std::string& 
     return -1;
   }
 }
+
+Status
 
 // addnode 的操作必须要是序列化的
 Status CH_node_impl::AddNode(::grpc::ServerContext* context, const ::Bicache::AddNodeRequest* req, ::Bicache::AddNodeReply* reply){
@@ -83,14 +87,120 @@ Status CH_node_impl::AddNode(::grpc::ServerContext* context, const ::Bicache::Ad
     //这个地方是有一个中间状态的，在这个中间状态需要不对外提供写服务，只提供读服务。
     reply->set_range_start(range_start_);
     //TODO:: 似乎这里的赋值都只能使用遍历？？？脑阔痛
-    for(int i=0;i<finger_table.size();i++){
-      reply->add_finger_table()->CopyFrom(finger_table[i]);
+    for(int i=0;i<finger_table_.size();i++){
+      reply->add_finger_table()->CopyFrom(finger_table_[i]);
     }
     //reply->mutable_finger_table() = finger_table;
     range_start_ = (pos +1)% virtual_node_num_;
     INFO("add req from:"+ip+":"+port +" :before "+ std::to_string(reply->range_start()) +", after:"+std::to_string(range_start_));
+    pre_node_ = req->pos();
+    pre_node_ip_port_ = ip+":"+port;
     return {grpc::StatusCode::OK, ""};
   }
+}
+Status CH_node_impl::FindPreDecessor(::grpc::ServerContext* context, const ::Bicache::FindPreDecessorRequest* request, ::Bicache::FindPreDecessorReply* reply){
+
+}
+
+//Status CH_node_impl::FindSuccessor(::grpc::ServerContext* context, const ::Bicache::FindSuccRequest* req, ::Bicache::FindSuccReply* reply){
+//
+//}
+
+//TODO:: delete
+//Status CH_node_impl::FindSuccessor(::grpc::ServerContext* context, const ::Bicache::FindSuccRequest* req, ::Bicache::FindSuccReply* reply){
+//  int pos = req->pos();
+//  //TODO:: 可以先做一个判断看是不是在当前的 range 之内，可以减少一些代价
+////  if(){
+////    reply->found = false;
+////    return {grpc::StatusCode::Aborted, "not in my range"};
+////  }
+//  int ret= find_successor(pos, finger_table);
+//  if(ret > 0){
+//    reply->set_found(true);
+//    reply->set_successor(ret);
+//    return {grpc::StatusCode::OK, ""};
+//  }
+//  reply->set_successor((- ret)%virtual_node_num_);
+//  reply->set_found(false);
+//  return {grpc::StatusCode::ABORTED, "not in my range"};
+//}
+//
+//int CH_node_impl::find_successor(int pos, std::vector<Bicache::FingerItem>& finger_table){
+//  for(int i=mbit-1; i>=0;i--){
+//    auto& item = finger_table[i-1];
+//    if( ((pos + virtual_node_num_) - item.start())% virtual_node_num_ < item.interval()){
+//      return pos;
+//    }
+//  }
+//  if(finger_table[mbit-1].successor() ==0 ){
+//    return -virtual_node_num_;
+//  }
+//  return - finger_table[mbit-1].successor();
+//}
+
+
+
+bool CH_node_impl::find_closest_preceding_finger(int pos, int& close_one, std::vector<Bicache::FingerItem>& finger_table){
+  int i = mbit-1;
+  //首先判断在不在这个 finger_table 的范围内，不在的话，返回最后一个，最后一个如果是自己，则自己就是
+  //论文里返回的节点 n，应该返回最远的
+  auto finger_end = (finger_table[i].start() + finger_table[i].interval())%virtual_node_num_;
+  auto finger_start = (cur_pos_ + 1)%virtual_node_num_;
+  if(finger_start>finger_end ){
+    if(pos <finger_start ||pos> finger_end){
+      // 没有找到对应的node，返回最远的
+      close_one=finger_table[i].successor();
+      return false;
+    }
+  }else{
+    if(pos >finger_end && pos< finger_start){
+      close_one=finger_table[i].successor();
+      return false;
+    }
+  }
+  if(pos == cur_pos_){
+    close_one=pre_node_;
+    return true;
+  }
+  for(;i>=0;i--){
+    auto finger_pos = (finger_table[i].start() + finger_table[i].interval())%virtual_node_num_;
+    if( finger_pos > cur_pos_){
+      if(pos > cur_pos_ && finger_pos <= pos){
+        close_one = finger_table[i].successor();
+        return false;
+      }
+    // 中间跨过原点的情况
+    }else{
+      if( pos> cur_pos_){
+        close_one = finger_table[i].successor();
+        return false;
+      // pos 也跨过了原点
+      }else if(pos<finger_pos){
+        close_one = finger_table[i].successor();
+        return false;
+      }
+    }
+  }
+  close_one = finger_end;
+  return false;
+}
+
+bool CH_node_impl::find_successor(int pos, int node){
+  int close_one = 0;
+  // 一样的话
+  if(node == cur_pos_){
+    //先找到最近的
+    close_one = find_closest_preceding_finger(pos, close_one, finger_table_);
+    INFO(node, "close to "+std::to_string(pos) + " is " +std::to_string(close_one));
+  }
+  //创建 client
+  auto ite_to_host = pos2host_.find(close_one);
+  if(ite_to_host == pos2host_.end()){
+    ERROR(node, "no ip of pos"+std::to_string(close_one));
+    return false;
+  }
+  auto node_ip_port = ite_to_host->second;
+  INFO(node, node_ip_port);
 }
 
 int CH_node_impl::add_node_req(){
@@ -109,16 +219,31 @@ int CH_node_impl::add_node_req(){
     range_start_ =reply.range_start();
     //这里可以确保 add_node_req 不是当前的节点发出的，所以可以安全的更新 finger_table
     //initialize the finger_table of newcomer node(this parts may be abstracted into a block/function of codes)
-    int i = 0, j = 0; 
-    for(i=0;i<mbit;i++){
+
+    auto interval_start = range_start_;
+    std::vector<Bicache::FingerItem> finger_table;
+    for(int i=0;i<reply.finger_table_size();i++){
+      finger_table.push_back(std::move(*reply.mutable_finger_table(i)));
+    }
+    for(int i=0;i<mbit;i++){
       Bicache::FingerItem item;
       //TODO::to be accomplished
-//      item.set_start(interval_start);
-//      item.set_interval(pow(2.0, double(i-1)));
-//      item.set_successor(cur_pos_);
+      item.set_start(interval_start);
+      item.set_interval(pow(2.0, double(i-1)));
+      auto item_upper = interval_start + pow(2.0, double(i-1));
+      //find the closest one 
+      int close_one = 0;
+      auto ret = find_closest_preceding_finger(item_upper, close_one, finger_table);
+      if(ret){
+        //进行直接拿到
+        item.set_successor(close_one);
+      }else{
+        if(!find_successor(close_one, item_upper)){
+          ERROR(cur_pos_, "find successor "+ std::to_string(item_upper)+ " failed on "+ std::to_string(close_one));
+        }
+      }
 //      interval_start = (interval_start + item.interval())%virtual_node_num_;
 //      finger_table.push_back(std::move(item));
-
     }
 
     return 0; 
@@ -126,6 +251,8 @@ int CH_node_impl::add_node_req(){
   ERROR(status.error_message());
   return -1;
 }
+
+
 
 void CH_node_impl::run(){
   

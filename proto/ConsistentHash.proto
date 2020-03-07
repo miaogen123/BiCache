@@ -27,6 +27,8 @@ service ConsistentHash{
   //rpc HeartBeat(HeartBeatRequest) returns (HeartBeatReply) {}
   rpc HeartBeat(HeartBeatRequest) returns (HeartBeatReply) {}
   rpc AddNode(AddNodeRequest) returns (AddNodeReply) {}
+  rpc FindSuccessor(FindSuccRequest) returns (FindSuccReply) {}
+  rpc FindPreDecessor(FindPreDecessorRequest) returns (FindPreDecessorReply) {}
 }
 
 message AddNodeRequest{
@@ -39,6 +41,7 @@ message FingerItem{
   uint32 start = 1;
   uint32 interval = 2;
   uint32 successor = 3;
+  string ip_port = 4;
 }
 
 message AddNodeReply{
@@ -46,6 +49,7 @@ message AddNodeReply{
   uint32 range_start = 2;
   //deprecated, should not be used any more
   repeated FingerItem finger_table =3;
+  repeated string host_list = 4;
   string msg = 256 ;
 }
 
@@ -56,4 +60,23 @@ message HeartBeatRequest{
 
 message HeartBeatReply{
   uint64 timestamp = 1;
+}
+
+message FindSuccRequest{
+  uint32 pos = 1;
+}
+
+message FindSuccReply{
+  uint32 found = 1;
+  uint32 successor = 2;
+}
+
+message FindPreDecessorRequest{
+  uint32 pos = 1;
+}
+
+message FindPreDecessorReply{
+  uint32 found = 1;
+  uint32 node = 2;
+  uint32 successor = 3;
 }
