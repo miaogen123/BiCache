@@ -3,6 +3,7 @@
 #include <grpcpp/grpcpp.h>
 #include <memory>
 #include <mutex>
+#include <thread>
 #include "../pb/ConsistentHash.grpc.pb.h"
 #include "../pb/ProxyServer.grpc.pb.h"
 #include "../utils/log.h"
@@ -32,20 +33,21 @@ public:
     // run 里面做一些必要的开始工作
     int find_successor(int pos);
     void run();
+    ~CH_node_impl();
     // 需要对外提供一个查询 successor 的接口
 
 private:
+    void HB_to_proxy();
     int add_node_req();
-    bool find_successor(int pos, int node);
+    bool find_successor(int pos, int node, int& successor);
     bool find_closest_preceding_finger(int pos, int& close_one, std::vector<Bicache::FingerItem>& finger_table);
+    std::shared_ptr<std::thread> update_thr_;
+    bool exit_flag_;
     //保留关于其他节点的信息
     int virtual_node_num_;
     int pre_node_;
     std::string pre_node_ip_port_;
     // this mutex is uesd to protect the range
-    std::mutex range_mu_;
-    int range_start_ = 0;
-    // cur_pos which is also range_end
     int cur_pos_;
     int mbit;
     std::string next_ip_port_;

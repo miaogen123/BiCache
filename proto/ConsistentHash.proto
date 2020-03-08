@@ -46,7 +46,7 @@ message FingerItem{
 
 message AddNodeReply{
   int32 status = 1;
-  uint32 range_start = 2;
+  uint32 pre_node = 2;
   //deprecated, should not be used any more
   repeated FingerItem finger_table =3;
   repeated string host_list = 4;
@@ -79,4 +79,5 @@ message FindPreDecessorReply{
   uint32 found = 1;
   uint32 node = 2;
   uint32 successor = 3;
+  string succ_ip_port = 4;
 }

@@ -40,7 +40,7 @@ message RegisterReply{
   uint64 timestamp = 1;
   //the fields below are not used now
   //现在的 ProxyServer 不需要做loadbalance
-  uint64 range_start = 2;
+  uint64 next_node_pos = 2;
   uint64 range_end = 3;
   uint64 total_range = 4;
   //end the fields below are not used now
