@@ -76,6 +76,9 @@ add_custom_command(
         "${ch_proto}"
       DEPENDS "${ch_proto}")
 
+#set(CMAKE_CXX_FLAGS "-O0")
+add_compile_options("-O0")
+
 # Include generated *.pb.h files
 include_directories("${CMAKE_CURRENT_BINARY_DIR}/build")
 message(STATUS ${CMAKE_CURRENT_BINARY_DIR})
