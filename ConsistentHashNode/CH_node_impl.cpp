@@ -1,6 +1,7 @@
 #include <memory>
 #include <cstdio>
 #include <cmath>
+#include <random>
 #include <unistd.h>
 #include "CH_node_impl.h"
 
@@ -27,6 +28,7 @@ CH_node_impl::CH_node_impl(Conf& conf){
     mbit = to_ret;
   }
   update_thr_ = std::make_shared<std::thread>(&CH_node_impl::HB_to_proxy, this);
+  stablize_thr_ = std::make_shared<std::thread>(&CH_node_impl::stablize, this);
 }
 
 int CH_node_impl::register_to_proxy(const std::string& host, const std::string& port){
@@ -372,6 +374,29 @@ void CH_node_impl::run(){
   }while(retry<3);
 }
 
+void CH_node_impl::stablize(){
+  // 这个线程是只会有一个线程在跑的，所以用了 static random engine, instead of thread_local
+  std::random_device rd;
+  static std::mt19937 gen(rd());
+  std::uniform_int_distribution<uint32_t> dis(0, mbit-1);
+
+  do{
+    uint32_t finger_num_to_fix = dis(gen);
+    // 如果 stablize 过程中发生了节点的变更，发出 INFO log
+    if(finger_num_to_fix < finger_table_.size() && next_pos_ != cur_pos_ ){
+      auto& item = finger_table_[finger_num_to_fix];
+      auto pre_succ = item.successor();
+      auto successor = 0;
+      find_successor(cur_pos_, item.start(), successor);
+      item.set_successor(successor);
+      if(pre_succ != successor){
+        printf("node %d, finger %d changed from %d to %d\n", cur_pos_, item.start(), pre_succ, successor);
+      }
+    }
+    sleep(stablize_interval_);
+  }while(!exit_flag_);
+}
+
 void CH_node_impl::HB_to_proxy(){
   //Status ProxyServerImpl::HeartBeat(ServerContext* context, const ProxyHeartBeatRequest* req, ProxyHeartBeatReply* reply){
   ::Bicache::ProxyHeartBeatRequest req;
@@ -395,11 +420,11 @@ void CH_node_impl::HB_to_proxy(){
     }else{
       this->node_status_[0].pos = this->pre_node_;
       this->node_status_[0].status = NodeStatus::Alive;
-      //INFO(cur_pos_, "HB to " + std::to_string(this->pre_node_));
+      INFO(cur_pos_, "HB to " + std::to_string(this->pre_node_));
       return true;
     }
   };
-  while(exit_flag_){
+  while(!exit_flag_){
     if(pre_node_ != -1 &&pre_node_ != cur_pos_){
       HB_to_pre_node();
     }
@@ -424,8 +449,9 @@ void CH_node_impl::HB_to_proxy(){
 }
 
 CH_node_impl::~CH_node_impl(){
-  exit_flag_ = false;
+  exit_flag_ = true;
   update_thr_->join();
+  stablize_thr_->join();
 }
 
 // //保留关于其他节点的信息

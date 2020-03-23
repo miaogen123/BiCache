@@ -82,7 +82,7 @@ Status ProxyServerImpl::Register(ServerContext* context, const RegisterRequest* 
     INFO("receive register: "+ ip+ ":"+port+", get pos:" + std::to_string(pos)+" next pos" + std::to_string(reply->next_node_pos())+",next host"+ reply->next_node_ip_port());
 
     //record the node
-    auto seconds = get_seconds()+2000;
+    uint64_t seconds = get_seconds()+3000;
     pos_HB_lock_.lock();
     auto ite_pos = pos_HB_.find(pos);
     if(ite_pos==pos_HB_.end()){
@@ -91,7 +91,6 @@ Status ProxyServerImpl::Register(ServerContext* context, const RegisterRequest* 
         ite_pos->second = seconds;
     }
     pos_HB_lock_.unlock();
-
     return Status::OK;
 } 
     ////需要有数据结构，方便的记录当前的哈希环的拓扑：要考虑动态的删减的情况，
@@ -102,7 +101,7 @@ Status ProxyServerImpl::Register(ServerContext* context, const RegisterRequest* 
     //std::mutex add_node_lock;
     Status ProxyServerImpl::HeartBeat(ServerContext* context, const ProxyHeartBeatRequest* req, ProxyHeartBeatReply* reply){
         auto pos = req->pos();
-        auto cur_seconds = get_seconds()+2000;
+        uint64_t cur_seconds = get_seconds()+3000;
         pos_HB_lock_.lock();
         auto ite_pos = pos_HB_.find(pos);
         if(ite_pos!=pos_HB_.end()){

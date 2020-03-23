@@ -50,12 +50,16 @@ public:
     // 需要对外提供一个查询 successor 的接口
 
 private:
+    void stablize();
     void HB_to_proxy();
     int add_node_req();
     bool find_successor(int pos, int node, int& successor);
     bool find_closest_preceding_finger(int pos, int& close_one, std::vector<Bicache::FingerItem>& finger_table);
-    std::shared_ptr<std::thread> update_thr_;
-    bool exit_flag_;
+
+    //config 
+    int stablize_interval_ = 3000;
+
+    bool exit_flag_ = false;
     //保留关于其他节点的信息
     int virtual_node_num_;
     int pre_node_=-1;
@@ -73,6 +77,10 @@ private:
     std::unique_ptr<Bicache::ConsistentHash::Stub> pre_CH_client_;
     std::vector<Bicache::FingerItem> finger_table_;
     std::unordered_map<uint, std::string> pos2host_;
+ 
+    //后台线程
+    std::shared_ptr<std::thread> stablize_thr_;
+    std::shared_ptr<std::thread> update_thr_;
     // 记录前一个和后一个节点的状态(0和1)
     // 这个跟之前的 pre_nnode_ next_node 多少有点重合，之后有精力的话再进行重构吧 TODO::
     std::vector<nodeStatus> node_status_{{-1, NodeStatus::Disconnected}, {-1, NodeStatus::Disconnected}};
