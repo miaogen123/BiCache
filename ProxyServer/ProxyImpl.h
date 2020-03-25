@@ -7,6 +7,12 @@
 #include <thread>
 #include <unordered_map>
 #include <mutex>
+#include "spdlog/spdlog.h"
+
+using spdlog::info;
+using spdlog::critical;
+using spdlog::debug;
+using spdlog::warn;
 
 namespace Bicache{
 

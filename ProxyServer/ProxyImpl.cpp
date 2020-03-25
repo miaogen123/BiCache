@@ -31,7 +31,7 @@ ProxyServerImpl::ProxyServerImpl(std::unordered_map<std::string, std::string>& c
         }
     }
     update_flag_ = true;
-    INFO("proxy server working");
+    info("proxy server working");
     //std::thread* tmp = new std::thread(&ProxyServerImpl::backend_update, this);
     update_thr_ = std::make_shared<std::thread>(&ProxyServerImpl::backend_update, this);
 }
@@ -79,7 +79,7 @@ Status ProxyServerImpl::Register(ServerContext* context, const RegisterRequest* 
     reply->set_total_range(virtual_node_num_);
     reply->set_pos(pos);
     
-    INFO("receive register: "+ ip+ ":"+port+", get pos:" + std::to_string(pos)+" next pos" + std::to_string(reply->next_node_pos())+",next host"+ reply->next_node_ip_port());
+    info("receive register: {}:{}, get pos:{} next pos {}, next host {}", ip, port, pos,  reply->next_node_pos(), reply->next_node_ip_port());
 
     //record the node
     uint64_t seconds = get_seconds()+3000;
@@ -90,33 +90,31 @@ Status ProxyServerImpl::Register(ServerContext* context, const RegisterRequest* 
     }else{
         ite_pos->second = seconds;
     }
+    //printf("current time %ld", seconds);
     pos_HB_lock_.unlock();
     return Status::OK;
 } 
-    ////需要有数据结构，方便的记录当前的哈希环的拓扑：要考虑动态的删减的情况，
-    ////需要有 host 和位置，以及位置和 host 的映射
-    //std::unordered_map<std::string, int> host2pos;
-    //std::unordered_map<int, std::string> pos2host;
-    ////node register 需要是有序的
-    //std::mutex add_node_lock;
-    Status ProxyServerImpl::HeartBeat(ServerContext* context, const ProxyHeartBeatRequest* req, ProxyHeartBeatReply* reply){
-        auto pos = req->pos();
-        uint64_t cur_seconds = get_seconds()+3000;
-        pos_HB_lock_.lock();
-        auto ite_pos = pos_HB_.find(pos);
-        if(ite_pos!=pos_HB_.end()){
-            ite_pos->second = cur_seconds;
-        }
-        pos_HB_lock_.unlock();
-        return grpc::Status{grpc::StatusCode::OK, ""};
+
+//需要有数据结构，方便的记录当前的哈希环的拓扑：要考虑动态的删减的情况，
+Status ProxyServerImpl::HeartBeat(ServerContext* context, const ProxyHeartBeatRequest* req, ProxyHeartBeatReply* reply){
+    auto pos = req->pos();
+    uint64_t cur_seconds = get_seconds()+3000;
+    pos_HB_lock_.lock();
+    auto ite_pos = pos_HB_.find(pos);
+    if(ite_pos!=pos_HB_.end()){
+        ite_pos->second = cur_seconds;
     }
+    pos_HB_lock_.unlock();
+    return grpc::Status{grpc::StatusCode::OK, ""};
+}
 
     void ProxyServerImpl::backend_update(){
         uint64_t seconds;
         while(update_flag_){
             sleep(1);
-            INFO("start to clean unlinked node");
             seconds = get_seconds();
+            info("start to clean unlinked node");
+            //printf("current time %ld", seconds);
             pos_HB_lock_.lock();
             auto ite = pos_HB_.begin();
             auto ite_end = pos_HB_.end();
@@ -128,7 +126,7 @@ Status ProxyServerImpl::Register(ServerContext* context, const RegisterRequest* 
                         host2pos_.erase(host_ptr->second);
                         pos2host_.erase(host_ptr);
                     }
-                    INFO("from proxy erase node "+std::to_string(host_ptr->first));
+                    warn("from proxy erase node {}", host_ptr->first);
                     add_node_lock_.unlock();
                     ite=pos_HB_.erase(ite);
                 }else{

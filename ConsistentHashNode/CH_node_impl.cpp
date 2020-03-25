@@ -11,7 +11,7 @@ CH_node_impl::CH_node_impl(Conf& conf){
   //init proxyClient
   auto proxy_ip = conf.get("proxy_ip");
   if(proxy_ip.size() == 0){
-      ERROR("whthout proxy ip, service starts failed");
+      critical("whthout proxy ip, service starts failed");
   }
   auto proxy_port = conf.get("proxy_port", "7790");
   // get client
@@ -61,14 +61,14 @@ int CH_node_impl::register_to_proxy(const std::string& host, const std::string& 
       pos2host_[cur_pos_]=cur_host_ip_+":"+cur_host_port_;
       pos2host_[reply.next_node_pos()]= reply.next_node_ip_port();
     }
-      INFO(cur_pos_, " next node is "+ std::to_string(reply.next_node_pos()));
+    info("{} next node is {}", cur_pos_, reply.next_node_pos());
     std::string msg = "register OK, cur_pos_: "+ std::to_string(reply.pos()) + " total_range:" \
       + std::to_string(reply.total_range()) +" next_ip:"+ reply.next_node_ip_port();
     next_pos_ = reply.next_node_pos();
-    INFO(msg.c_str());
+    info(msg);
     return 0;
   }else{
-    ERROR(status.error_message().c_str());
+    critical(status.error_message().c_str());
     return -1;
   }
 }
@@ -99,7 +99,7 @@ Status CH_node_impl::AddNode(::grpc::ServerContext* context, const ::Bicache::Ad
       reply->add_finger_table()->CopyFrom(finger_table_[i]);
     }
     //reply->mutable_finger_table() = finger_table;
-    INFO("add req from:"+ip+":"+port +" :pre node before "+ std::to_string(pre_node_) +", after:"+std::to_string(req->pos()));
+    info("{} add req from: {}:{} pre node  before:{}, after: {}",cur_pos_, ip, port, pre_node_, req->pos());
     reply->set_pre_node(pre_node_);
     reply->set_pre_node_ip_port(pre_node_ip_port_);
     
@@ -112,6 +112,7 @@ Status CH_node_impl::AddNode(::grpc::ServerContext* context, const ::Bicache::Ad
     }
     pre_node_ = req->pos();
     pre_node_ip_port_ = pre_node_ip_port_tmp;
+    pos2host_[pre_node_] = pre_node_ip_port_;
     return {grpc::StatusCode::OK, ""};
   }
 }
@@ -126,23 +127,26 @@ Status CH_node_impl::FindPreDecessor(::grpc::ServerContext* context, const ::Bic
       reply->set_successor((cur_pos_+1)%virtual_node_num_);
       reply->set_succ_ip_port(next_node_ip_port_);
   }
-  find_closest_preceding_finger(pos, close_one, finger_table_);
-  if(close_one==cur_pos_){
+  // 这里也类似的逻辑，同样需要判断
+  auto ret = find_closest_preceding_finger(pos, close_one, finger_table_);
+
+  if(ret != -1){
       reply->set_found(true);
       reply->set_node(cur_pos_);
-      reply->set_successor(cur_pos_);
-      reply->set_succ_ip_port(next_node_ip_port_);
+      reply->set_successor(ret);
+      reply->set_succ_ip_port(pos2host_[ret]);
   }else{
       reply->set_found(false);
       reply->set_node(cur_pos_);
       auto next_node_pos = (cur_pos_+1)%virtual_node_num_;
+      //没有找到的时候，应该返回 close one 
       reply->set_successor(next_node_pos);
       if(pos2host_.find(next_node_pos)==pos2host_.end()){
-        ERROR(cur_pos_, "can't find ip of"+std::to_string(next_node_pos));
+        critical("{} can't find ip of {}", cur_pos_, next_node_pos);
       }
       reply->set_succ_ip_port(pos2host_[next_node_pos]);
   }
-  printf("Node %d: findpre %d from %d, found:%d, successor %d\n", cur_pos_, pos, req->node(), reply->found(), reply->successor());
+  info("Node {}: findpre {} from {}, found:{}, successor {}\n", cur_pos_, pos, req->node(), reply->found(), reply->successor());
   return {grpc::StatusCode::OK, ""};
 }
 
@@ -150,9 +154,12 @@ Status CH_node_impl::HeartBeat(::grpc::ServerContext* context, const ::Bicache::
   //同时也要维护一个结构体，关于上下游节点的信息
   reply->set_next_pos(finger_table_.cbegin()->start());
   reply->set_next_node_ip_port(next_node_ip_port_);
-  //INFO(cur_pos_, context->peer()+" get HB from "+ std::to_string(req->pos()));
+  //info(cur_pos_, context->peer()+" get HB from "+ std::to_string(req->pos()));
   next_pos_ = req->pos();
   next_node_ip_port_ = req->host_ip()+":"+req->host_port();
+  //更新 finger_table 的内容
+  finger_table_[0].set_successor(next_pos_);
+  finger_table_[0].set_ip_port(next_node_ip_port_);
   return {grpc::StatusCode::OK, ""};
 }
 
@@ -194,12 +201,12 @@ Status CH_node_impl::HeartBeat(::grpc::ServerContext* context, const ::Bicache::
 
 
 
-bool CH_node_impl::find_closest_preceding_finger(int pos, int& close_one, std::vector<Bicache::FingerItem>& finger_table){
+int CH_node_impl::find_closest_preceding_finger(int pos, int& close_one, std::vector<Bicache::FingerItem>& finger_table){
   int i = mbit-1;
   //首先判断在不在这个 finger_table 的范围内，不在的话，返回最后一个，最后一个如果是自己，则自己就是
   //论文里返回的节点 n，应该返回最远的
   if(finger_table.size()==0){
-    ERROR(cur_pos_, "find closest preceding finger with NULL finger_table");
+    critical("node: {} find closest preceding finger with NULL finger_table", cur_pos_);
     exit(1);
   }
 
@@ -209,20 +216,39 @@ bool CH_node_impl::find_closest_preceding_finger(int pos, int& close_one, std::v
   for(;i>=0;i--){
     auto finger_pos = finger_table[i].successor();
     //there is an interval
+    //printf("close : {} {} {}\n", finger_start, finger_pos, pos);
+    //auto& item = finger_table[i];
+    //printf("In find:node {}, finger {}, {}, {}, \n", cur_pos_, item.start(), item.interval(), item.successor());
     if(finger_start > finger_pos){
       if(pos<finger_start && pos> finger_pos){
         close_one = finger_pos;
-        return false;
+        return -1;
       }
     }else{
       if(pos >= finger_pos || pos < finger_start){
         close_one = finger_pos;
-        return false;
+        return -1;
       }
     }
   }
   close_one = cur_pos_;
-  return false;
+
+  if(close_one == cur_pos_){
+    //2种情况，一种在范围内，一种不在范围内
+    if(next_pos_> cur_pos_){
+      if(pos > cur_pos_ && pos <= next_pos_){
+        return next_pos_;
+      }else{
+        return cur_pos_;
+      }
+    }else{
+      if(pos > next_pos_ && pos <= cur_pos_ ){
+        return cur_pos_;
+      }else{
+        return next_pos_;
+      }
+    }
+  }
 }
 
 bool CH_node_impl::find_successor(int node, int pos, int& successor){
@@ -235,31 +261,43 @@ bool CH_node_impl::find_successor(int node, int pos, int& successor){
     successor = cur_pos_;
     return true;
   }
+  int close_one = 0;
   if(node == cur_pos_){
     //先找到最近的
-    if(find_closest_preceding_finger(pos, node, finger_table_)){
-      successor = node;
-      return true;
+    auto ret = find_closest_preceding_finger(pos, close_one, finger_table_);
+    if( ret != -1){
+      successor = ret;
     }
-    INFO(node, "close to "+std::to_string(pos) + " is " +std::to_string(node));
+    info("{} close to {} is {}",node, pos, close_one);
   }
 
+  
   //创建 client
-  auto ite_to_host = pos2host_.find(node);
+  auto ite_to_host = pos2host_.find(close_one);
   if(ite_to_host == pos2host_.end()){
-    ERROR(cur_pos_, "no ip of pos "+std::to_string(node));
+    critical("{} no ip of pos {}", cur_pos_, close_one);
     return false;
   }
   auto node_ip_port = ite_to_host->second;
   ::Bicache::FindPreDecessorRequest req;
   ::Bicache::FindPreDecessorReply reply;
+  int retry = 0;
   do{
     auto CH_client = std::make_unique<Bicache::ConsistentHash::Stub>(grpc::CreateChannel(
         node_ip_port, grpc::InsecureChannelCredentials()));
     req.set_pos(pos);
     req.set_node(cur_pos_);
     ::grpc::ClientContext ctx;
-    CH_client->FindPreDecessor(&ctx, req, &reply);
+    auto status = CH_client->FindPreDecessor(&ctx, req, &reply);
+    //防止对方节点失联
+    if(!status.ok()){
+      retry++;
+      if(retry>=3){
+        critical("{} find pre failed, pre&peer: {} {}", cur_pos_, pos, node_ip_port);
+        return false;
+      }
+      usleep(500000);
+    }
     if(reply.found()){
       successor = reply.successor();
       auto ite = pos2host_.find(pos);
@@ -270,8 +308,10 @@ bool CH_node_impl::find_successor(int node, int pos, int& successor){
       }
       return true;
     }else{
-      INFO(pos, "jump to node" + reply.succ_ip_port());
+      //TODO: 加上 node_pos
+      info("{} jump to node {}", pos,  reply.succ_ip_port());
       node_ip_port = reply.succ_ip_port();
+      sleep(1);
     }
   }while(true);
 }
@@ -315,21 +355,19 @@ int CH_node_impl::add_node_req(){
       int close_one = 0;
       auto ret = find_closest_preceding_finger(item_upper, close_one, finger_table);
       int successor = 0;
-      if(ret){
+      if(ret != -1){
         //进行直接拿到
-        item.set_successor(close_one);
-      }else if(close_one == cur_pos_){
-        item.set_successor(next_pos_);
+        item.set_successor(ret);
       }else{
         if(!find_successor(close_one, item_upper, successor)){
-          ERROR(cur_pos_, "find successor "+ std::to_string(item_upper)+ " failed on "+ std::to_string(close_one));
+          critical("{} find successor {}  failed on {}", cur_pos_, item_upper, close_one);
         }
         item.set_successor(successor);
       }
       interval_start = (interval_start + item.interval())%virtual_node_num_;
       //TEST:查看 finger_table 的构建
-      //INFO(cur_pos_, "fingeritem "+ std::to_string(item.start())+ std::to_string())
-      printf("node %d, finger %d, %d, %d, %s\n", cur_pos_, item.start(), item.interval(), item.successor(), item.ip_port().c_str());
+      //info(cur_pos_, "fingeritem "+ std::to_string(item.start())+ std::to_string())
+      info("node {}, finger {}, {}, {}, {}\n", cur_pos_, item.start(), item.interval(), item.successor(), item.ip_port().c_str());
       finger_table_.push_back(std::move(item));
       //TODO:: 这里要填充  pos2host
     }
@@ -342,11 +380,10 @@ int CH_node_impl::add_node_req(){
     }
     pre_node_ip_port_ = pre_node_ip_port_tmp;
     pre_node_ = reply.pre_node();
-    INFO(cur_pos_, "pre pos: " + std::to_string(pre_node_));
-    INFO(cur_pos_, "prenode: " + pre_node_ip_port_);
+    info("{} pre pos: {} prenode:{} ", cur_pos_, pre_node_, pre_node_ip_port_);
     return 0; 
   }
-  ERROR(status.error_message());
+  critical(status.error_message());
   return -1;
 }
 
@@ -354,20 +391,20 @@ int CH_node_impl::add_node_req(){
 
 void CH_node_impl::run(){
   if(register_to_proxy(cur_host_ip_, cur_host_port_)){
-    ERROR("register error, aborting");
+    critical("register error, aborting");
     exit(-1);
   }
   //create client for next node 
   int retry = 0;
   do{
     if(next_node_ip_port_ == cur_host_ip_+":"+cur_host_port_){
-      INFO("first node registered");
+      info("first node registered");
       break;
     }
     if(add_node_req()==0)
       break;
     if(retry ==2 ){
-      ERROR("add node failed, aborting");
+      critical("add node failed, aborting");
       exit(-1);
     }
     retry++;
@@ -382,7 +419,7 @@ void CH_node_impl::stablize(){
 
   do{
     uint32_t finger_num_to_fix = dis(gen);
-    // 如果 stablize 过程中发生了节点的变更，发出 INFO log
+    // 如果 stablize 过程中发生了节点的变更，发出 info log
     if(finger_num_to_fix < finger_table_.size() && next_pos_ != cur_pos_ ){
       auto& item = finger_table_[finger_num_to_fix];
       auto pre_succ = item.successor();
@@ -390,10 +427,12 @@ void CH_node_impl::stablize(){
       find_successor(cur_pos_, item.start(), successor);
       item.set_successor(successor);
       if(pre_succ != successor){
-        printf("node %d, finger %d changed from %d to %d\n", cur_pos_, item.start(), pre_succ, successor);
+        info("S:node {}, finger {} changed from {} to {}, next_node {}\n", cur_pos_, item.start(), pre_succ, successor, next_pos_);
       }
+
+      info("S:node {}, finger {}, {}, {}, {}\n", cur_pos_, item.start(), item.interval(), item.successor(), item.ip_port().c_str());
     }
-    sleep(stablize_interval_);
+    usleep(stablize_interval_);
   }while(!exit_flag_);
 }
 
@@ -403,7 +442,7 @@ void CH_node_impl::HB_to_proxy(){
   req.set_pos(cur_pos_);
   ::Bicache::ProxyHeartBeatReply reply;
   int retry = 0;
-  uint64_t sleep_time = 300000;
+  uint64_t sleep_time = 500000;
 
   // HB to pre node 
   ::Bicache::HeartBeatRequest node_req;
@@ -415,12 +454,12 @@ void CH_node_impl::HB_to_proxy(){
     ::grpc::ClientContext ctx;
     auto status = this->pre_CH_client_->HeartBeat(&ctx, node_req, &node_reply);
     if(!status.ok()){
-      ERROR(this->cur_pos_, "connect to pre node failed, prenode: " + std::to_string(this->pre_node_));
+      critical("{} connect to pre node failed, prenode: {}", this->cur_pos_,this->pre_node_);
       return false;
     }else{
       this->node_status_[0].pos = this->pre_node_;
       this->node_status_[0].status = NodeStatus::Alive;
-      INFO(cur_pos_, "HB to " + std::to_string(this->pre_node_));
+      //info(cur_pos_, "HB to " + std::to_string(this->pre_node_));
       return true;
     }
   };
@@ -432,11 +471,12 @@ void CH_node_impl::HB_to_proxy(){
     //keep HeartBeat with proxy
     ::grpc::ClientContext ctx;
     auto status = proxy_client_->HeartBeat(&ctx, req, &reply);
+//    info(cur_pos_, "HB to proxy");
     usleep(sleep_time);
 
 // 下面这些重试的逻辑先不要管了
 //    if(!status.ok()){
-//      ERROR(cur_pos_, std::to_string(retry)+ "try HB with proxy failed");
+//      critical(cur_pos_, std::to_string(retry)+ "try HB with proxy failed");
 //      retry++;
 //      if(retry>10){
 //        sleep_time = 2000000;

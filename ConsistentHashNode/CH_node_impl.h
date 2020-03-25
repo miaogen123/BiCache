@@ -8,6 +8,7 @@
 #include "../pb/ProxyServer.grpc.pb.h"
 #include "../utils/log.h"
 #include "../utils/conf.h"
+#include "spdlog/spdlog.h"
 
 using grpc::Channel;
 using grpc::ClientContext;
@@ -17,6 +18,10 @@ using Bicache::RegisterRequest;
 using Bicache::RegisterReply;
 using Bicache::AddNodeRequest;
 using Bicache::AddNodeReply;
+using spdlog::info;
+using spdlog::critical;
+using spdlog::debug;
+using spdlog::warn;
 
 enum class NodeStatus{
     Alive = 1,
@@ -54,10 +59,11 @@ private:
     void HB_to_proxy();
     int add_node_req();
     bool find_successor(int pos, int node, int& successor);
-    bool find_closest_preceding_finger(int pos, int& close_one, std::vector<Bicache::FingerItem>& finger_table);
+    int find_closest_preceding_finger(int pos, int& close_one, std::vector<Bicache::FingerItem>& finger_table);
+
 
     //config 
-    int stablize_interval_ = 3000;
+    int stablize_interval_ = 1000000;
 
     bool exit_flag_ = false;
     //保留关于其他节点的信息

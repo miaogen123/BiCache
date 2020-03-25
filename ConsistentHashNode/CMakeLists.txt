@@ -1,5 +1,5 @@
 
-cmake_minimum_required(VERSION 2.8)
+cmake_minimum_required(VERSION 3.1)
 set(CMAKE_CXX_STANDARD 14)
 
 project(Bicache C CXX)
@@ -13,6 +13,11 @@ endif()
 ###
 # include externalproject 
 include(../external_modules/CMakeLists.txt)
+#
+if(NOT TARGET spdlog)
+    # Stand-alone build
+    find_package(spdlog REQUIRED)
+endif()
 
 
 # This branch assumes that gRPC and all its dependencies are already installed
@@ -99,5 +104,7 @@ foreach(_target
      ${git_utils})
   target_link_libraries(${_target}
     ${_GRPC_GRPCPP_UNSECURE}
-    ${_PROTOBUF_LIBPROTOBUF})
+    ${_PROTOBUF_LIBPROTOBUF}
+    spdlog::spdlog
+    )
 endforeach()
