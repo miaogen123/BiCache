@@ -90,7 +90,7 @@ Status ProxyServerImpl::Register(ServerContext* context, const RegisterRequest* 
     }else{
         ite_pos->second = seconds;
     }
-    //printf("current time %ld", seconds);
+    debug("node {} register at {}", pos, seconds);
     pos_HB_lock_.unlock();
     return Status::OK;
 } 
@@ -126,7 +126,7 @@ Status ProxyServerImpl::HeartBeat(ServerContext* context, const ProxyHeartBeatRe
                         host2pos_.erase(host_ptr->second);
                         pos2host_.erase(host_ptr);
                     }
-                    warn("from proxy erase node {}", host_ptr->first);
+                    warn("from proxy erase node {}: current time {}, node register time {}", host_ptr->first, seconds, ite->second);
                     add_node_lock_.unlock();
                     ite=pos_HB_.erase(ite);
                 }else{

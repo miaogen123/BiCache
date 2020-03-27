@@ -11,6 +11,8 @@
 #include "../pb/ProxyServer.grpc.pb.h"
 #include "ProxyImpl.h"
 
+#define SPDLOG_DEBUG_ON
+
 using grpc::Channel;
 using grpc::ClientContext;
 using grpc::Status;
@@ -45,7 +47,9 @@ void RunServer(const std::string& port, std::unordered_map<std::string, std::str
 
 int main(int argc, char** argv) {
 
-  spdlog::set_pattern("[%H:%M:%S:%e] [%^%l%$] [tid %t] %v");
+  //spdlog::set_level(spdlog::level::info);
+  spdlog::set_level(spdlog::level::debug);
+  spdlog::set_pattern("[%H:%M:%S:%e] [%^%L%$] [tid %t] %v");
   std::unordered_map<std::string, std::string> conf;
   std::string port;
   

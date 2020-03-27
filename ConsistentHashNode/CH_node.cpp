@@ -21,8 +21,12 @@ using Bicache::ProxyServer;
 using Bicache::RegisterRequest;
 using Bicache::RegisterReply;
 
+#define SPDLOG_DEBUG_ON
+
 int main() {
-  spdlog::set_pattern("[%H:%M:%S:%e] [%^%l%$] [tid %t] %v");
+  //spdlog::set_level(spdlog::level::info);
+  spdlog::set_level(spdlog::level::debug);
+  spdlog::set_pattern("[%H:%M:%S:%e] [%^%L%$] [tid %t] %v");
   Conf conf("CH_config");
   if(!conf.get_file_stated()){
     spdlog::critical("can't find conf file");
