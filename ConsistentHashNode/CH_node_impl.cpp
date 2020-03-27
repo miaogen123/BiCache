@@ -515,7 +515,7 @@ void CH_node_impl::HB_to_proxy(){
     ::grpc::ClientContext ctx;
     auto status = proxy_client_->HeartBeat(&ctx, req, &reply);
     if(!status.ok()){
-      debug("{} FAILED HB", cur_pos_);
+      debug("{} FAILED HB to proxy", cur_pos_);
     }
     usleep(sleep_time);
 

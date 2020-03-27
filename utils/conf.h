@@ -2,6 +2,7 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <assert.h>
 #include "../MyUtils/cpp/fileOp.h"
 
 class Conf{
@@ -16,6 +17,10 @@ public:
     }
     Conf(std::ifstream& fstream){
         assert(false);
+    }
+    Conf(const Conf& conf){
+        this->inner_map = conf.inner_map;
+        this->is_file_opened = conf.get_file_stated();
     }
     void parse(const std::string& fileContent){
         std::vector<std::string> splited_content;
