@@ -10,7 +10,7 @@ using grpc::StatusCode;
 
 //静态成员初始化
 std::mutex ProxyServerImpl::add_node_lock_;
-uint64_t get_seconds(){
+uint64_t get_miliseconds(){
     using namespace std::chrono;
     steady_clock::duration d;
     d = steady_clock::now().time_since_epoch();
@@ -82,7 +82,7 @@ Status ProxyServerImpl::Register(ServerContext* context, const RegisterRequest* 
     info("receive register: {}:{}, get pos:{} next pos {}, next host {}", ip, port, pos,  reply->next_node_pos(), reply->next_node_ip_port());
 
     //record the node
-    uint64_t seconds = get_seconds()+3000;
+    uint64_t seconds = get_miliseconds()+3000;
     pos_HB_lock_.lock();
     auto ite_pos = pos_HB_.find(pos);
     if(ite_pos==pos_HB_.end()){
@@ -98,7 +98,7 @@ Status ProxyServerImpl::Register(ServerContext* context, const RegisterRequest* 
 //需要有数据结构，方便的记录当前的哈希环的拓扑：要考虑动态的删减的情况，
 Status ProxyServerImpl::HeartBeat(ServerContext* context, const ProxyHeartBeatRequest* req, ProxyHeartBeatReply* reply){
     auto pos = req->pos();
-    uint64_t cur_seconds = get_seconds()+3000;
+    uint64_t cur_seconds = get_miliseconds()+3000;
     pos_HB_lock_.lock();
     auto ite_pos = pos_HB_.find(pos);
     if(ite_pos!=pos_HB_.end()){
@@ -112,7 +112,7 @@ Status ProxyServerImpl::HeartBeat(ServerContext* context, const ProxyHeartBeatRe
         uint64_t seconds;
         while(update_flag_){
             sleep(1);
-            seconds = get_seconds();
+            seconds = get_miliseconds();
             info("start to clean unlinked node");
             //printf("current time %ld", seconds);
             pos_HB_lock_.lock();

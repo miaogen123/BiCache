@@ -52,14 +52,16 @@ public:
     // run 里面做一些必要的开始工作
     void run();
     ~CH_node_impl();
-    // 需要对外提供一个查询 successor 的接口
 
+    //for upper service
+    bool in_range(const uint32_t pos)const;
+    int find_closest_preceding_finger(int pos, int& close_one, const std::vector<Bicache::FingerItem>& finger_table);
+    const std::vector<Bicache::FingerItem>& get_finger_table()const;
 private:
     void stablize();
     void HB_to_proxy();
     int add_node_req();
     bool find_successor(int pos, int node, int& successor);
-    int find_closest_preceding_finger(int pos, int& close_one, std::vector<Bicache::FingerItem>& finger_table);
 
 
     //config 

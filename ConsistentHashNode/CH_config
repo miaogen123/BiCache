@@ -2,3 +2,5 @@ mbit 4
 proxy_ip 0.0.0.0
 proxy_port 7790
 CH_node_port 7788
+KV_port 9001 
+bucket_size 100000

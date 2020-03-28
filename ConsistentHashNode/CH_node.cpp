@@ -11,6 +11,23 @@
 #include "KV_store.h"
 
 #define SPDLOG_DEBUG_ON
+void start_kv_service(Conf& conf){
+  auto KV_port= conf.get("KV_port");
+  if(KV_port.size()==0){
+    spdlog::critical("get KV_node_port error");
+    exit(-1);
+  }
+  std::string server_address("0.0.0.0:"+KV_port);
+  auto kv_store_impl = std::make_shared<KV_store_impl>(conf);
+  //CH_node_impl node{inner_conf};
+  grpc::ServerBuilder builder;
+  builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
+  builder.RegisterService(kv_store_impl.get());
+  std::unique_ptr<grpc::Server> server(builder.BuildAndStart());
+  spdlog::info("kv service start at {}", server_address);
+  kv_store_impl->init();
+  server->Wait();
+}
 
 int main() {
   //spdlog::set_level(spdlog::level::info);
@@ -30,7 +47,6 @@ int main() {
     exit(-1);
   }
   conf.set("host_ip", ip);
-  KV_store_impl kv_store{conf};
-  kv_store.init();
+  start_kv_service(conf);
   return 0;
 }

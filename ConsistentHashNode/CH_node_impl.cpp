@@ -224,7 +224,7 @@ Status CH_node_impl::HeartBeat(::grpc::ServerContext* context, const ::Bicache::
 //  return - finger_table[mbit-1].successor();
 //}
 
-int CH_node_impl::find_closest_preceding_finger(int pos, int& close_one, std::vector<Bicache::FingerItem>& finger_table){
+int CH_node_impl::find_closest_preceding_finger(int pos, int& close_one, const std::vector<Bicache::FingerItem>& finger_table){
   int i = mbit-1;
   //首先判断在不在这个 finger_table 的范围内，不在的话，返回最后一个，最后一个如果是自己，则自己就是
   //论文里返回的节点 n，应该返回最远的
@@ -259,6 +259,8 @@ int CH_node_impl::find_closest_preceding_finger(int pos, int& close_one, std::ve
 
   if(close_one == cur_pos_){
     //2种情况，一种在范围内，一种不在范围内
+    // 相对来说比较差/丑的方式
+    //可以参考 in_range 的实现，相对优雅一些
     if(next_pos_> cur_pos_){
       if(pos > cur_pos_ && pos <= next_pos_){
         //info("1debug: {} {} {}", cur_pos_, next_pos_, pos);
@@ -348,6 +350,9 @@ bool CH_node_impl::find_successor(int node, int pos, int& successor){
       sleep(1);
     }
   }while(true);
+}
+const std::vector<Bicache::FingerItem>& CH_node_impl::get_finger_table()const{
+  return finger_table_;
 }
 
 int CH_node_impl::add_node_req(){
@@ -530,6 +535,20 @@ void CH_node_impl::HB_to_proxy(){
 //      retry = 0;
 //      sleep_time = 300000;
 //    }
+  }
+}
+
+bool CH_node_impl::in_range(const uint32_t pos)const{
+  // 利用 range 来进行判断
+  uint32_t range =(next_pos_ + virtual_node_num_ - cur_pos_) % virtual_node_num_;
+  if(range == 0){
+    return true;
+  }
+  uint32_t actu_range =(pos + virtual_node_num_ - cur_pos_) % virtual_node_num_;
+  if(actu_range <= range){
+    return true;
+  }else{
+    return false;
   }
 }
 

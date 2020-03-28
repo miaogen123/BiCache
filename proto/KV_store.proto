@@ -32,12 +32,15 @@ service KV_service{
 
 message GetRequest{
   //该节点分配的位置
-  string key = 1;
-  uint64 pos_of_key = 2;
-  uint64 timestamp = 3;
+  uint32 req_id = 1;
+  string key = 2;
+  uint64 pos_of_key = 3;
+  uint64 timestamp = 4;
 }
 message GetReply{
   //该节点分配的位置
-  string value = 1;
-  uint64 timestamp = 2;
+  bool is_found = 1;  
+  string value = 2;
+  uint64 close_pos = 3;
+  uint64 timestamp = 4;
 }
