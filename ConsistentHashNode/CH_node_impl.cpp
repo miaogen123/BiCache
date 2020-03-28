@@ -494,7 +494,6 @@ void CH_node_impl::stablize(){
 void CH_node_impl::HB_to_proxy(){
   //Status ProxyServerImpl::HeartBeat(ServerContext* context, const ProxyHeartBeatRequest* req, ProxyHeartBeatReply* reply){
   ::Bicache::ProxyHeartBeatRequest req;
-  req.set_pos(cur_pos_);
   ::Bicache::ProxyHeartBeatReply reply;
   int retry = 0;
   uint64_t sleep_time = 500000;
@@ -525,7 +524,9 @@ void CH_node_impl::HB_to_proxy(){
     //和 proxy & pre node 的通信放在同一个线程里面
     //keep HeartBeat with proxy
     ::grpc::ClientContext ctx;
+    req.set_pos(cur_pos_);
     auto status = proxy_client_->HeartBeat(&ctx, req, &reply);
+    //debug("HB to proxy");
     if(!status.ok()){
       debug("{} FAILED HB to proxy", cur_pos_);
     }

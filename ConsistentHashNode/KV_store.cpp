@@ -17,6 +17,7 @@ uint64_t get_miliseconds(){
 KV_store_impl::KV_store_impl(Conf& conf):inner_conf_(conf){
     auto bucket_size = conf.get("bucket_size", "10000");
     inner_cache_.reserve(atoi(bucket_size.c_str()));
+    inner_cache_["hello"]="world";
 }
 
 //TODO:: 有些接口定义的不是很同一（同时存在 Response&Reply）
@@ -57,6 +58,7 @@ KV_store_impl::KV_store_impl(Conf& conf):inner_conf_(conf){
   }
   //流量小的时候可以，大的时候就不能打这种log了
   //info("Get from ")
+  return {grpc::StatusCode::OK, ""};
 }
 
 void KV_store_impl::init(){

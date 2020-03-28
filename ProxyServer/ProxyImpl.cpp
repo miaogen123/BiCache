@@ -106,6 +106,7 @@ Status ProxyServerImpl::HeartBeat(ServerContext* context, const ProxyHeartBeatRe
         ite_pos->second = cur_seconds;
     }
     pos_HB_lock_.unlock();
+    //debug("update pos {} to cur_seconds {}", pos,cur_seconds);
     return grpc::Status{grpc::StatusCode::OK, ""};
 }
 
@@ -117,8 +118,8 @@ Status ProxyServerImpl::GetConfig(ServerContext* context, const GetConfigRequest
             reply->add_pos_list(pair.first);
             reply->add_ip_port_list(pair.second);
         }
-
     }
+    reply->set_virtual_node_num(virtual_node_num_);
     return grpc::Status{grpc::StatusCode::OK, ""};
 }
 

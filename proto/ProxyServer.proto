@@ -72,4 +72,5 @@ message GetConfigReply{
 //这里使用两个变量而不是使用一个map是因为，protobuf 的复杂结构使用起来并不友好
   repeated uint32 pos_list = 1;
   repeated string ip_port_list = 2;
+  uint32 virtual_node_num= 3;
 }
