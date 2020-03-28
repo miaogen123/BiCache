@@ -22,13 +22,14 @@ service ProxyServer{
   rpc Register(RegisterRequest) returns (RegisterReply) {}
   rpc HeartBeat(ProxyHeartBeatRequest) returns (ProxyHeartBeatReply) {}
   //不急着完成
-  //rpc GetConfig(RegisterRequest) returns (RegisterReply) {}
+  rpc GetConfig(GetConfigRequest) returns (GetConfigReply) {}
 }
 
 // The request message containing the user's name.
 message RegisterRequest{
   string ip = 1;
   string port = 2;
+  string kv_port = 3;
 //  optional range
 //  uint64 range_end = 3;
 //  uint64 total_range= 4;
@@ -63,10 +64,12 @@ message ProxyHeartBeatReply{
   uint64 timestamp = 1;
 }
 
-//message GetConfigRequest{
-//  uint64 timestamp = 1;
-//}
-//
-//message GetConfigReply{
-//  uint64 timestamp = 1;
-//}
+message GetConfigRequest{
+}
+
+//周期性的获取：获取
+message GetConfigReply{
+//这里使用两个变量而不是使用一个map是因为，protobuf 的复杂结构使用起来并不友好
+  repeated uint32 pos_list = 1;
+  repeated string ip_port_list = 2;
+}

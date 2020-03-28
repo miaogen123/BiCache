@@ -60,6 +60,7 @@ Status ProxyServerImpl::Register(ServerContext* context, const RegisterRequest* 
             } else {
                 //FIXME:::已经存在的节点，重新加入时，应该如何处理
                 pos2host_.insert({pos, ip_port_origin});
+                pos2kvhost_.insert({pos, ip+":"+req->kv_port()});
                 host2pos_.insert({ip_port_origin, pos});
                 break;
             }
@@ -108,36 +109,52 @@ Status ProxyServerImpl::HeartBeat(ServerContext* context, const ProxyHeartBeatRe
     return grpc::Status{grpc::StatusCode::OK, ""};
 }
 
-    void ProxyServerImpl::backend_update(){
-        uint64_t seconds;
-        while(update_flag_){
-            sleep(1);
-            seconds = get_miliseconds();
-            info("start to clean unlinked node");
-            //printf("current time %ld", seconds);
-            pos_HB_lock_.lock();
-            auto ite = pos_HB_.begin();
-            auto ite_end = pos_HB_.end();
-            for(;ite!=pos_HB_.end();){
-                if(ite->second < seconds){
-                    add_node_lock_.lock();
-                    auto host_ptr = pos2host_.find(ite->first);
-                    if(host_ptr!=pos2host_.end()){
-                        host2pos_.erase(host_ptr->second);
-                        pos2host_.erase(host_ptr);
-                    }
-                    warn("from proxy erase node {}: current time {}, node register time {}", host_ptr->first, seconds, ite->second);
-                    add_node_lock_.unlock();
-                    ite=pos_HB_.erase(ite);
-                }else{
-                    ite++;
-                }
-            }
-            pos_HB_lock_.unlock();
+Status ProxyServerImpl::GetConfig(ServerContext* context, const GetConfigRequest* req, GetConfigReply* reply){
+    //老实讲，这个地方并发访问也是要加锁的，就是不知道三个线程用同一个把锁对于性能会不会有什么的地方
+    {
+        std::lock_guard<std::mutex> lg(pos_HB_lock_);
+        for(auto& pair:pos2kvhost_){
+            reply->add_pos_list(pair.first);
+            reply->add_ip_port_list(pair.second);
         }
+
     }
-    ProxyServerImpl::~ProxyServerImpl(){
-        update_flag_ = false;
-        update_thr_->join();
+    return grpc::Status{grpc::StatusCode::OK, ""};
+}
+
+void ProxyServerImpl::backend_update(){
+    uint64_t seconds;
+    while(update_flag_){
+        sleep(1);
+        seconds = get_miliseconds();
+        info("start to clean unlinked node");
+        //printf("current time %ld", seconds);
+        pos_HB_lock_.lock();
+        auto ite = pos_HB_.begin();
+        auto ite_end = pos_HB_.end();
+        for(;ite!=pos_HB_.end();){
+            if(ite->second < seconds){
+                add_node_lock_.lock();
+                auto host_ptr = pos2host_.find(ite->first);
+                if(host_ptr!=pos2host_.end()){
+                    host2pos_.erase(host_ptr->second);
+                    pos2kvhost_.erase(host_ptr->first);
+                    pos2host_.erase(host_ptr);
+                }
+                warn("from proxy erase node {}: current time {}, node register time {}", host_ptr->first, seconds, ite->second);
+                add_node_lock_.unlock();
+                ite=pos_HB_.erase(ite);
+            }else{
+                ite++;
+            }
+        }
+        pos_HB_lock_.unlock();
     }
+}
+
+ProxyServerImpl::~ProxyServerImpl(){
+    update_flag_ = false;
+    update_thr_->join();
+}
+
 }

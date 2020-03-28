@@ -12,6 +12,12 @@ CH_node_impl::CH_node_impl(Conf& conf){
   auto proxy_ip = conf.get("proxy_ip");
   if(proxy_ip.size() == 0){
       critical("whthout proxy ip, service starts failed");
+      exit(-1);
+  }
+  kv_port_ = conf.get("KV_port");
+  if(kv_port_.empty()){
+    critical("without KV port, aborted");
+    exit(-1);
   }
   auto proxy_port = conf.get("proxy_port", "7790");
   // get client
@@ -36,6 +42,7 @@ int CH_node_impl::register_to_proxy(const std::string& host, const std::string& 
   RegisterReply reply;
   req.set_ip(host);
   req.set_port(port);
+  req.set_kv_port(kv_port_);
   ClientContext context;
   auto status = proxy_client_->Register(&context, req, &reply);
   if(status.ok()){

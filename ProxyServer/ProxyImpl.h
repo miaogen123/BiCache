@@ -28,6 +28,7 @@ public:
     ProxyServerImpl(std::unordered_map<std::string, std::string>& conf);
     Status Register(ServerContext* context, const RegisterRequest* req, RegisterReply* reply)override;
     Status HeartBeat(ServerContext* context, const ProxyHeartBeatRequest* req, ProxyHeartBeatReply* reply)override;
+    Status GetConfig(ServerContext* context, const GetConfigRequest* req, GetConfigReply* reply)override;
 
     void backend_update();
     ~ProxyServerImpl();
@@ -36,6 +37,8 @@ private:
     //需要有 host 和位置，以及位置和 host 的映射
     std::unordered_map<std::string, int> host2pos_;
     std::map<int, std::string> pos2host_;
+    //pos2kvpost_ 和 pos2host_：前者是 pos->kv port
+    std::map<int, std::string> pos2kvhost_;
     //node register 需要是有序的
     static std::mutex add_node_lock_;
 

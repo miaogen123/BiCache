@@ -64,9 +64,10 @@ private:
     bool find_successor(int pos, int node, int& successor);
 
 
+    //上层服务的信息
+    std::string kv_port_;
     //config 
     int stablize_interval_ = 1000000;
-
     bool exit_flag_ = false;
     //保留关于其他节点的信息
     int virtual_node_num_;
