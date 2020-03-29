@@ -32,7 +32,9 @@ public:
     KV_store_impl(Conf& conf);
     KV_store_impl()=delete;
 
+    int is_valid(uint64_t& timestamp, int& req_id, uint64_t& key_pos, std::string& msg);
     virtual ::grpc::Status Get(::grpc::ServerContext* context, const ::Bicache::GetRequest* request, ::Bicache::GetReply* response)override;
+    virtual ::grpc::Status Set(::grpc::ServerContext* context, const ::Bicache::SetRequest* req, ::Bicache::SetReply* rsp)override;
 
     void init();
     static void run();

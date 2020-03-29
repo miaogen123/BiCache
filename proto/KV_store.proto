@@ -25,6 +25,7 @@ package Bicache;
 service KV_service{
   // Sends a greeting
   rpc Get(GetRequest) returns (GetReply) {}
+  rpc Set(SetRequest) returns (SetReply) {}
 //  rpc Mget() returns () {}
 //  rpc Set() returns () {}
 //  rpc Mset() returns () {}
@@ -38,9 +39,25 @@ message GetRequest{
   uint64 timestamp = 4;
 }
 message GetReply{
-  //该节点分配的位置
   bool is_found = 1;  
   string value = 2;
   uint64 close_pos = 3;
   uint64 timestamp = 4;
+  uint32 status_code = 255;
+}
+
+message SetRequest{
+  //该节点分配的位置
+  uint32 req_id = 1;
+  string key = 2;
+  uint64 pos_of_key = 3;
+  uint64 value = 4;
+  uint64 timestamp = 5;
+}
+message SetReply{
+  bool is_set = 1;  
+  string value = 2;
+  uint64 close_pos = 3;
+  uint64 timestamp = 4;
+  uint32 status_code = 255;
 }
