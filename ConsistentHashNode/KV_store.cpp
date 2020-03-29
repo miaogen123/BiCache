@@ -103,7 +103,8 @@ int KV_store_impl::is_valid(uint64_t& timestamp, int& req_id, uint64_t& key_pos,
   auto ite = inner_cache_.find(key);
   if(ite!=inner_cache_.end()){
     rsp->set_is_set(true);
-    ite->second = rsp->value();
+    ite->second = req->value();
+    info("set key {} value {}", key, req->value());
   }
   //流量小的时候可以，大的时候就不能打这种log了
   //info("Get from ")

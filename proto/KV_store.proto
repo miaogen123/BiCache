@@ -51,7 +51,7 @@ message SetRequest{
   uint32 req_id = 1;
   string key = 2;
   uint64 pos_of_key = 3;
-  uint64 value = 4;
+  string value = 4;
   uint64 timestamp = 5;
 }
 message SetReply{
