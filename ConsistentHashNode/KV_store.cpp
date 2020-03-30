@@ -75,6 +75,10 @@ int KV_store_impl::is_valid(uint64_t& timestamp, int& req_id, uint64_t& key_pos,
     auto ite = inner_cache_.find(key);
     if(ite==inner_cache_.end()){
       rsp->set_value("");
+    }else if(ite->second.first < get_miliseconds()){
+      //超时就取不到
+      rsp->set_status_code(-4);
+      debug("get key {} failed because of expire", key);
     }else{
       rsp->set_is_found(true);
       rsp->set_value(ite->second.second);

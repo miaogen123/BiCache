@@ -152,7 +152,7 @@ public:
     req.set_pos_of_key(key_successor);
     req.set_timestamp(get_miliseconds());
     req.set_req_id(getRandomInt());
-    req.set_update_times(3000);
+    req.set_update_times(2000);
     req.set_value(value);
 
     auto status = kv_client->Set(&ctx, req, &rsp);
