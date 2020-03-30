@@ -37,6 +37,8 @@ message GetRequest{
   string key = 2;
   uint64 pos_of_key = 3;
   uint64 timestamp = 4;
+  //times to extension existence
+  uint64 update_times= 6;
 }
 message GetReply{
   bool is_found = 1;  
@@ -53,6 +55,9 @@ message SetRequest{
   uint64 pos_of_key = 3;
   string value = 4;
   uint64 timestamp = 5;
+  //times to extension existence
+  uint64 update_times= 6;
+
 }
 message SetReply{
   bool is_set = 1;  
