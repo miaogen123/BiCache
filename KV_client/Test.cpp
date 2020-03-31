@@ -144,6 +144,7 @@ public:
       warn("no client of pos {}", key_successor);
       return -1;
     }
+
     auto kv_client = ite_client->second;
     Bicache::SetRequest req;
     Bicache::SetReply rsp;

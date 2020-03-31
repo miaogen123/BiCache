@@ -66,6 +66,8 @@ message HeartBeatReply{
   //自己的下游
   uint32 next_pos = 1;
   string next_node_ip_port = 2;
+  uint32 pre_pos = 3;
+  string pre_node_ip_port = 4;
 }
 
 message FindSuccRequest{

@@ -70,16 +70,23 @@ private:
     int stablize_interval_ = 1000000;
     bool exit_flag_ = false;
     //保留关于其他节点的信息
+    int mbit;
     int virtual_node_num_;
+    //这个命名也多少有点不一致
     int pre_node_=-1;
     std::string pre_node_ip_port_;
-    // this mutex is uesd to protect the range
-    int cur_pos_;
-    int mbit;
     int next_pos_;
     std::string next_node_ip_port_;
+    int cur_pos_;
     std::string cur_host_ip_;
     std::string cur_host_port_;
+    
+    //记录N个上节点，记录的节点越多，可靠性也就越高
+    //TODO::后面有扩展的想法在搞这个吧，我这里就用简单的上一个节点好了。
+    //std::vector<int> pre_node_list;
+    //std::vector<std::string> pre_node_ipport_list;
+    int pp_pos_;
+    std::string pp_node_ip_port_;
     std::unique_ptr<Bicache::ProxyServer::Stub> proxy_client_;
     std::unique_ptr<Bicache::ConsistentHash::Stub> CH_client_;
     // 在跟上一个节点发生了 HB 以后在进行 pre node client 的创建

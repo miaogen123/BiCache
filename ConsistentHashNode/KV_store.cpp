@@ -206,7 +206,7 @@ void KV_store_impl::backend_update(){
 //      }
 
 
-      if(count==5){
+      if(count==60){
         info("clean log: clean {} expire req_ids_", expire_clean_count++);
         count=0;
         expire_clean_count=0;
