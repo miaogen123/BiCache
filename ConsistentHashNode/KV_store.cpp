@@ -63,7 +63,7 @@ int KV_store_impl::is_valid(uint64_t& timestamp, int& req_id, uint64_t& key_pos,
   if(ret == -3){
     int close_one = -1;
     ch_node_->find_closest_preceding_finger(key_pos, close_one, ch_node_->get_finger_table());
-    info("close one {} to key_pos {}", close_one, key_pos);
+    info("KV:close one {} to key_pos {}", close_one, key_pos);
     rsp->set_close_pos(close_one);
   }
   if(ret<0){
@@ -78,14 +78,14 @@ int KV_store_impl::is_valid(uint64_t& timestamp, int& req_id, uint64_t& key_pos,
     }else if(ite->second.first < get_miliseconds()){
       //超时就取不到
       rsp->set_status_code(-4);
-      debug("get key {} failed because of expire", key);
+      debug("KV:get key {} failed because of expire", key);
     }else{
       rsp->set_is_found(true);
       rsp->set_value(ite->second.second);
     }
   }
   //流量小的时候可以，大的时候就不能打这种log了
-  //info("Get from ")
+  //info("KV:Get from ")
   return {grpc::StatusCode::OK, ""};
 }
 
@@ -120,14 +120,14 @@ int KV_store_impl::is_valid(uint64_t& timestamp, int& req_id, uint64_t& key_pos,
       ite->second.second = value;
     }
     ite->second.first = (timestamp + req->update_times());
-    //info("set key {} value {} {}", key, req->value(), ite->second.first);
+    //info("KV:set key {} value {} {}", key, req->value(), ite->second.first);
     if(req->update_times()>0){
       expire_queue_.push( std::make_pair(ite->second.first, ite) );
-      info("update expire time {} to {}: update_times {}",  key, timestamp, req->update_times());
+      info("KV:update expire time {} to {}: update_times {}",  key, timestamp, req->update_times());
     }
   }
   //流量小的时候可以，大的时候就不能打这种log了
-  //info("Get from ")
+  //info("KV:Get from ")
   return {grpc::StatusCode::OK, ""};
 }
 
@@ -140,7 +140,7 @@ void KV_store_impl::init(){
 void KV_store_impl::run_CH_node(){
   std::string CH_node_port = inner_conf_.get("CH_node_port");
   if(CH_node_port.size()==0){
-    spdlog::critical("get CH_node_port error");
+    spdlog::critical("KV:get CH_node_port error");
     exit(-1);
   }
 
@@ -151,13 +151,13 @@ void KV_store_impl::run_CH_node(){
   builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
   builder.RegisterService(ch_node_.get());
   std::unique_ptr<grpc::Server> server(builder.BuildAndStart());
-  spdlog::info("CH node listening on {}", server_address);
+  spdlog::info("KV:CH node listening on {}", server_address);
   ch_node_->run();
   server->Wait();
 }
 
 void KV_store_impl::backend_update(){
-  info("start cleaning: cleaning interval = 2s, info log interval = 10s");
+  info("KV:start cleaning: cleaning interval = 2s, info log interval = 10s");
   //TODO::这里先清理reqids，后面添加了 key 超时以后再设置 key 清理的逻辑
   int count = 0;
   int expire_clean_count = 0;
@@ -183,11 +183,11 @@ void KV_store_impl::backend_update(){
         std::unique_lock<std::shared_mutex> lock(rw_lock_for_cache_);
         while (!expire_queue_.empty()) {
             const timed_key& tk = expire_queue_.top();
-            //debug("tk {} second {} {} {} {}", tk.first, tk.second->first, tk.second->second.first, tk.second->second.second, curr_ts);
+            //debug("KV:tk {} second {} {} {} {}", tk.first, tk.second->first, tk.second->second.first, tk.second->second.second, curr_ts);
             if (tk.first < curr_ts) {
                 auto it = tk.second;
                 if (it != inner_cache_.end() && it->second.first < curr_ts) {
-                    info("clean {} value {} timestamp {} cur {} queue.size{}", it->first, it->second.second, it->second.first, curr_ts, expire_queue_.size());
+                    info("KV:clean {} value {} timestamp {} cur {} queue.size{}", it->first, it->second.second, it->second.first, curr_ts, expire_queue_.size());
                     inner_cache_.erase(it);
                 }
                 expire_queue_.pop();
@@ -200,14 +200,14 @@ void KV_store_impl::backend_update(){
 //      while (!expire_queue_.empty()) {
 //          const timed_key& tk = expire_queue_.top();
 //          auto it = tk.second;
-//          info("clean {} value {} timestamp {} cur {} queue.size{} inner_cache_.size {}", it->first, it->second.second, it->second.first, curr_ts, expire_queue_.size(), inner_cache_.size());
+//          info("KV:clean {} value {} timestamp {} cur {} queue.size{} inner_cache_.size {}", it->first, it->second.second, it->second.first, curr_ts, expire_queue_.size(), inner_cache_.size());
 //          inner_cache_.erase(it);
 //          expire_queue_.pop();
 //      }
 
 
       if(count==60){
-        info("clean log: clean {} expire req_ids_", expire_clean_count++);
+        info("KV:clean log: clean {} expire req_ids_", expire_clean_count++);
         count=0;
         expire_clean_count=0;
       }
