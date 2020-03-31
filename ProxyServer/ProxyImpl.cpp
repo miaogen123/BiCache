@@ -120,6 +120,7 @@ Status ProxyServerImpl::GetConfig(ServerContext* context, const GetConfigRequest
         }
     }
     reply->set_virtual_node_num(virtual_node_num_);
+    info("client getConfig from {}", context->peer());
     return grpc::Status{grpc::StatusCode::OK, ""};
 }
 

@@ -24,7 +24,7 @@ void start_kv_service(Conf& conf){
   builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
   builder.RegisterService(kv_store_impl.get());
   std::unique_ptr<grpc::Server> server(builder.BuildAndStart());
-  spdlog::info("kv service start at {}", server_address);
+  spdlog::info("KV service start at {}", server_address);
   kv_store_impl->init();
   server->Wait();
 }

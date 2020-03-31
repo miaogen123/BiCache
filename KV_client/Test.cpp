@@ -40,7 +40,8 @@ uint64_t get_miliseconds(){
 }
 
 class KV_client{
-public:
+public: 
+  using PosClientType = std::unordered_map<uint32_t, std::shared_ptr<Bicache::KV_service::Stub>>;
   KV_client(Conf conf){
     auto proxy_ip = conf.get("proxy_ip");
     auto proxy_port = conf.get("proxy_port");
@@ -48,6 +49,7 @@ public:
     proxy_client_ = std::make_shared<Bicache::ProxyServer::Stub>(grpc::CreateChannel(
         proxy_ip_port_, grpc::InsecureChannelCredentials() ));
   }
+
   void GetTology(){
     ClientContext ctx;
     Bicache::GetConfigRequest req;
@@ -69,11 +71,13 @@ public:
         info("get config successfully, node size {}", pos2host_.size());
       }
     }
+    std::unique_ptr<PosClientType> pos2kvclient_ptr_tmp(new PosClientType());
     for(auto& pair : pos2host_){
       auto proxy_client = std::make_shared<Bicache::KV_service::Stub>(grpc::CreateChannel(
           pair.second, grpc::InsecureChannelCredentials()));
-      pos2kvclient_[pair.first]= proxy_client; 
+      (*pos2kvclient_ptr_tmp)[pair.first]= proxy_client; 
     }
+    pos2kvclient_ptr_.swap(pos2kvclient_ptr_tmp);
   }
 
   uint32_t get_key_successor(const std::string& key, uint32_t& key_pos){
@@ -88,15 +92,15 @@ public:
     return successor;
   }
 
-  std::string TestGet(const std::string& key) {
+  std::string Get(const std::string& key) {
     if(pos2host_.empty()){
       warn("pos list is empty, which is impossible for me to find any keys");
       return "";
     }
     uint32_t key_pos=0;
     auto key_successor = get_key_successor(key, key_pos);
-    auto ite_client = pos2kvclient_.find(key_successor);
-    if(ite_client == pos2kvclient_.end()){
+    auto ite_client = (*pos2kvclient_ptr_).find(key_successor);
+    if(ite_client == (*pos2kvclient_ptr_).end()){
       warn("no client of pos {}", key_successor);
       return "";
     }
@@ -111,6 +115,9 @@ public:
 
     auto status = kv_client->Get(&ctx, req, &rsp);
     if(!status.ok()){
+      if(status.error_code()==grpc::StatusCode::UNAVAILABLE){
+        GetTology();
+      }
       critical("Get req failed, error msg: {}", status.error_message());
       return "";
     }
@@ -132,15 +139,15 @@ public:
     return rsp.value();
   }
 
-  int TestSet(const std::string& key, const std::string& value) {
+  int Set(const std::string& key, const std::string& value) {
     if(pos2host_.empty()){
       warn("pos list is empty, which is impossible for me to find any keys");
       return -1;
     }
     uint32_t key_pos=0;
     auto key_successor = get_key_successor(key, key_pos);
-    auto ite_client = pos2kvclient_.find(key_successor);
-    if(ite_client == pos2kvclient_.end()){
+    auto ite_client = (*pos2kvclient_ptr_).find(key_successor);
+    if(ite_client == (*pos2kvclient_ptr_).end()){
       warn("no client of pos {}", key_successor);
       return -1;
     }
@@ -158,6 +165,10 @@ public:
 
     auto status = kv_client->Set(&ctx, req, &rsp);
     if(!status.ok()){
+      //节点连不上，尝试重建client
+      if(status.error_code()==grpc::StatusCode::UNAVAILABLE){
+        GetTology();
+      }
       critical("Get req failed, error msg: {}", status.error_message());
       return -1;
     }
@@ -175,7 +186,8 @@ private:
   std::string proxy_ip_port_;
   std::map<uint32_t, std::string> pos2host_;
   std::shared_ptr<Bicache::ProxyServer::Stub> proxy_client_;
-  std::unordered_map<uint32_t, std::shared_ptr<Bicache::KV_service::Stub>> pos2kvclient_;
+  //这里到不同的节点的client，用指针存储效果会更好，unique_ptr存储的话，就不要读写锁了
+  std::unique_ptr<PosClientType> pos2kvclient_ptr_;
 };
 
 int main(int argc, char** argv) {
@@ -189,14 +201,19 @@ int main(int argc, char** argv) {
   Conf conf("Client_config");
   KV_client kvc(conf);
   kvc.GetTology();
-  kvc.TestGet("hello");
-  kvc.TestSet("hello", "new_world");
-  kvc.TestGet("hello");
-  kvc.TestGet("hello1");
-  kvc.TestSet("hello1", "new_world1");
-  kvc.TestGet("hello1");
-  kvc.TestGet("hello2");
-  kvc.TestSet("hello2", "new_world2");
-  kvc.TestGet("hello2");
+  std::vector<std::string> keys;
+  std::vector<std::string> values;
+  for(auto i = 0 ;i<16;i++){
+    std::string key = getRandStr(16);
+    std::string value = getRandStr(16);
+    keys.push_back(key);
+    values.push_back(value);
+    kvc.Set(key, value);
+  }
+  for(auto i = 0 ;i<16;i++){
+    std::string key = keys[i];
+    kvc.Get(key);
+    usleep(400000);
+  }
   return 0;
 }
