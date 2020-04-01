@@ -1,4 +1,5 @@
 #include <memory>
+#include <limits>
 #include <cstdio>
 #include <cmath>
 #include <random>
@@ -119,11 +120,13 @@ int KV_store_impl::is_valid(uint64_t& timestamp, int& req_id, uint64_t& key_pos,
     }else{
       ite->second.second = value;
     }
-    ite->second.first = (timestamp + req->update_times());
     //info("KV:set key {} value {} {}", key, req->value(), ite->second.first);
     if(req->update_times()>0){
+      ite->second.first = (timestamp + req->update_times());
       expire_queue_.push( std::make_pair(ite->second.first, ite) );
       info("KV:update expire time {} to {}: update_times {}",  key, timestamp, req->update_times());
+    }else{
+      ite->second.first = std::numeric_limits<uint64_t>::max();
     }
   }
   //流量小的时候可以，大的时候就不能打这种log了

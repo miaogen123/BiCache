@@ -32,6 +32,8 @@ using spdlog::critical;
 using spdlog::debug;
 using spdlog::warn;
 
+uint32_t expire_time = 0;
+
 uint64_t get_miliseconds(){
     using namespace std::chrono;
     steady_clock::duration d;
@@ -160,7 +162,7 @@ public:
     req.set_pos_of_key(key_successor);
     req.set_timestamp(get_miliseconds());
     req.set_req_id(getRandomInt());
-    req.set_update_times(2000);
+    req.set_update_times(expire_time);
     req.set_value(value);
 
     auto status = kv_client->Set(&ctx, req, &rsp);
@@ -199,6 +201,7 @@ int main(int argc, char** argv) {
   std::string port;
   
   Conf conf("Client_config");
+  expire_time = atoi(conf.get("expire_time", "20000").c_str());
   KV_client kvc(conf);
   kvc.GetTology();
   std::vector<std::string> keys;
