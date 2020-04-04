@@ -3,6 +3,7 @@
 #include <grpcpp/grpcpp.h>
 #include <memory>
 #include <mutex>
+#include <atomic>
 #include <thread>
 #include "../pb/ConsistentHash.grpc.pb.h"
 #include "../pb/ProxyServer.grpc.pb.h"
@@ -34,6 +35,17 @@ struct nodeStatus{
     NodeStatus status;
 };
 
+// 0:normal work
+// 1:node adding
+// 2:node leaving
+// 下层 node 设置状态，由上游服务完成相应的操作以后，设置 
+static std::atomic<int> SystemStatus(0);
+//TODO::这个函数在ProxyImpl.cpp里面也有，代码略丑，待优化
+uint64_t get_miliseconds();
+
+
+class KV_store_impl;
+
 class CH_node_impl : public Bicache::ConsistentHash::Service {
 public:
     //to communicate with proxyServer 
@@ -42,7 +54,7 @@ public:
     CH_node_impl()=delete;
 
     Status AddNode(::grpc::ServerContext* context, const ::Bicache::AddNodeRequest* request, ::Bicache::AddNodeReply* reply)override;
-    //Status FindSuccessor(::grpc::ServerContext* context, const ::Bicache::FindSuccRequest* request, ::Bicache::FindSuccReply* reply)override;
+    Status GetData(::grpc::ServerContext* context, const ::Bicache::GetDataRequest* request, ::Bicache::GetDataReply* response)override;
     Status FindPreDecessor(::grpc::ServerContext* context, const ::Bicache::FindPreDecessorRequest* request, ::Bicache::FindPreDecessorReply* reply)override;
     //接收来自下游的信息（下游主动和上游进行通信）
     Status HeartBeat(::grpc::ServerContext* context, const ::Bicache::HeartBeatRequest* request, ::Bicache::HeartBeatReply* response);
@@ -51,12 +63,17 @@ public:
     int find_successor(int pos);
     // run 里面做一些必要的开始工作
     void run();
+    void set_kv_store_p(KV_store_impl* kv_store);
     ~CH_node_impl();
 
     //for upper service
+    bool in_range(const uint32_t pos, const uint32_t begin_pos)const;
     bool in_range(const uint32_t pos)const;
     int find_closest_preceding_finger(int pos, int& close_one, const std::vector<Bicache::FingerItem>& finger_table);
     const std::vector<Bicache::FingerItem>& get_finger_table()const;
+    
+    //和上层沟通用的函数
+    //用一个共享的条件变量，用来通知上游服务
 private:
     void stablize();
     void HB_to_proxy();
@@ -69,6 +86,7 @@ private:
     //config 
     int stablize_interval_ = 1000000;
     bool exit_flag_ = false;
+    KV_store_impl* kv_store_p_;
     //保留关于其他节点的信息
     int mbit;
     int virtual_node_num_;

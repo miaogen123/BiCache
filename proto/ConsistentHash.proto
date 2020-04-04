@@ -27,8 +27,16 @@ service ConsistentHash{
   //rpc HeartBeat(HeartBeatRequest) returns (HeartBeatReply) {}
   rpc HeartBeat(HeartBeatRequest) returns (HeartBeatReply) {}
   rpc AddNode(AddNodeRequest) returns (AddNodeReply) {}
+  rpc GetData(GetDataRequest) returns (GetDataReply) {}
   rpc FindSuccessor(FindSuccRequest) returns (FindSuccReply) {}
   rpc FindPreDecessor(FindPreDecessorRequest) returns (FindPreDecessorReply) {}
+}
+
+message FingerItem{
+  uint32 start = 1;
+  uint32 interval = 2;
+  uint32 successor = 3;
+  string ip_port = 4;
 }
 
 message AddNodeRequest{
@@ -36,12 +44,6 @@ message AddNodeRequest{
   string ip = 1;
   string port = 2;
   uint64 pos = 3;
-}
-message FingerItem{
-  uint32 start = 1;
-  uint32 interval = 2;
-  uint32 successor = 3;
-  string ip_port = 4;
 }
 
 message AddNodeReply{
@@ -51,6 +53,27 @@ message AddNodeReply{
   repeated FingerItem finger_table =4;
   repeated string host_list = 5;
   //deprecated, should not be used any more
+  string msg = 256 ;
+}
+
+message GetDataRequest{
+  //该节点分配的位置
+  string ip = 1;
+  string port = 2;
+  uint64 pos = 3;
+  //0:全量，1：增量
+  int32 get_mode = 4;
+  //时间点
+  uint64 last_snapshot = 5;
+  bool join_node = 6;
+}
+
+message GetDataReply{
+  //用来承载数据，包含 key/value，expire time
+  int32 status = 1;
+  repeated string key = 2;
+  repeated string value = 3;
+  repeated uint64 expire_time = 4;
   string msg = 256 ;
 }
 

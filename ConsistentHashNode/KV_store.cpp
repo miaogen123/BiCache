@@ -7,18 +7,29 @@
 #include <unistd.h>
 #include "KV_store.h"
 
-//TODO::这个函数在ProxyImpl.cpp里面也有，代码略丑，待优化
-uint64_t get_miliseconds(){
-    using namespace std::chrono;
-    steady_clock::duration d;
-    d = steady_clock::now().time_since_epoch();
-    return duration_cast<milliseconds>(d).count();
-}
+extern std::atomic<int> SystemStatus;
 
 KV_store_impl::KV_store_impl(Conf& conf):inner_conf_(conf){
     auto bucket_size = conf.get("bucket_size", "10000");
     inner_cache_.reserve(atoi(bucket_size.c_str()));
     inner_cache_["hello"]=std::make_pair<uint64_t, std::string>(get_miliseconds(), "world");
+}
+
+void KV_store_impl::init(){
+  CH_node_serving_thr_ = std::make_shared<std::thread>(&KV_store_impl::run_CH_node, this);
+  backend_update_thr_ = std::make_shared<std::thread>(&KV_store_impl::backend_update, this);
+}
+
+const cache_type& KV_store_impl::split_inner_cache(){
+  return inner_cache_;
+}
+
+cache_type& KV_store_impl::get_mutable_inner_cache(){
+  return inner_cache_;
+}
+
+std::shared_mutex& KV_store_impl::get_inner_cache_lock(){
+  return rw_lock_for_cache_;
 }
 
 int KV_store_impl::is_valid(uint64_t& timestamp, int& req_id, uint64_t& key_pos, std::string& msg){
@@ -91,6 +102,10 @@ int KV_store_impl::is_valid(uint64_t& timestamp, int& req_id, uint64_t& key_pos,
 }
 
 ::grpc::Status KV_store_impl::Set(::grpc::ServerContext* context, const ::Bicache::SetRequest* req, ::Bicache::SetReply* rsp){
+  if(SystemStatus.load()!=0){
+    info("system status is {}", SystemStatus.load());
+    return {grpc::StatusCode::ABORTED, "system is maintaning"};
+  }
   uint64_t key_pos = req->pos_of_key();
   auto& key = req->key();
   auto timestamp = req->timestamp();
@@ -126,17 +141,13 @@ int KV_store_impl::is_valid(uint64_t& timestamp, int& req_id, uint64_t& key_pos,
       expire_queue_.push( std::make_pair(ite->second.first, ite) );
       info("KV:update expire time {} to {}: update_times {}",  key, timestamp, req->update_times());
     }else{
+      // update_time 为0 就设置成最大的
       ite->second.first = std::numeric_limits<uint64_t>::max();
     }
   }
   //流量小的时候可以，大的时候就不能打这种log了
   //info("KV:Get from ")
   return {grpc::StatusCode::OK, ""};
-}
-
-void KV_store_impl::init(){
-  CH_node_serving_thr_ = std::make_shared<std::thread>(&KV_store_impl::run_CH_node, this);
-  backend_update_thr_ = std::make_shared<std::thread>(&KV_store_impl::backend_update, this);
 }
 
 //单独的线程用来服务
@@ -149,10 +160,12 @@ void KV_store_impl::run_CH_node(){
 
   std::string server_address("0.0.0.0:"+CH_node_port);
   ch_node_ = std::make_shared<CH_node_impl>(inner_conf_);
+  ch_node_->set_kv_store_p(this);
   //CH_node_impl node{inner_conf};
   grpc::ServerBuilder builder;
   builder.AddListeningPort(server_address, grpc::InsecureServerCredentials());
   builder.RegisterService(ch_node_.get());
+  builder.SetMaxSendMessageSize(INT_MAX);
   std::unique_ptr<grpc::Server> server(builder.BuildAndStart());
   spdlog::info("KV:CH node listening on {}", server_address);
   ch_node_->run();
@@ -199,15 +212,15 @@ void KV_store_impl::backend_update(){
             }
         }
       }
-      //TEST
-//      while (!expire_queue_.empty()) {
-//          const timed_key& tk = expire_queue_.top();
-//          auto it = tk.second;
-//          info("KV:clean {} value {} timestamp {} cur {} queue.size{} inner_cache_.size {}", it->first, it->second.second, it->second.first, curr_ts, expire_queue_.size(), inner_cache_.size());
-//          inner_cache_.erase(it);
-//          expire_queue_.pop();
-//      }
 
+//TEST
+//  while (!expire_queue_.empty()) {
+//      const timed_key& tk = expire_queue_.top();
+//      auto it = tk.second;
+//      info("KV:clean {} value {} timestamp {} cur {} queue.size{} inner_cache_.size {}", it->first, it->second.second, it->second.first, curr_ts, expire_queue_.size(), inner_cache_.size());
+//      inner_cache_.erase(it);
+//      expire_queue_.pop();
+//  }
 
       if(count==60){
         info("KV:clean log: clean {} expire req_ids_", expire_clean_count++);

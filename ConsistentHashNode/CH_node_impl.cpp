@@ -4,6 +4,17 @@
 #include <random>
 #include <unistd.h>
 #include "CH_node_impl.h"
+#include "KV_store.h"
+#include "../MyUtils/cpp/hash.h"
+
+
+//TODO::这个函数在ProxyImpl.cpp里面也有，代码略丑，待优化
+uint64_t get_miliseconds(){
+    using namespace std::chrono;
+    steady_clock::duration d;
+    d = steady_clock::now().time_since_epoch();
+    return duration_cast<milliseconds>(d).count();
+}
 
 //to communicate with proxyServer 
 
@@ -114,23 +125,63 @@ Status CH_node_impl::AddNode(::grpc::ServerContext* context, const ::Bicache::Ad
     
     //create pre_CH_node_client first 
 
-    auto pre_node_ip_port_tmp = ip+":"+port;
-    if(pre_node_ip_port_tmp != cur_host_port_+":"+cur_host_port_){
-      pre_CH_client_ = std::make_unique<Bicache::ConsistentHash::Stub>(grpc::CreateChannel(
-        pre_node_ip_port_tmp, grpc::InsecureChannelCredentials()));
-    }
-    pre_node_ = req->pos();
-    pre_node_ip_port_ = pre_node_ip_port_tmp;
-    pos2host_[pre_node_] = pre_node_ip_port_;
     //debug info:before return print info
     for(auto i=0;i<reply->finger_table_size();i++){
       auto& item = reply->finger_table(i);
-      //好像没有 copy 成功？
       debug("Ser: addreq from {} item: start {}, successor {}, ip {}, ", pre_node_, item.start(), item.successor(), item.ip_port());
     }
     debug("Ser: reply finger table size {}", reply->finger_table_size());
     return {grpc::StatusCode::OK, ""};
   }
+}
+
+// 二次请求，这个请求里面完成数据的迁移 以及节点的确认加入
+//这里要分成两部分，另外新开一个 AddNodeAck 接口
+//为什么不直接搞事情呢？分出一个 二次 确认的逻辑是为什么呢？
+//其实和三次握手的逻辑有点像
+Status CH_node_impl::GetData(::grpc::ServerContext* context, const ::Bicache::GetDataRequest* req, ::Bicache::GetDataReply* reply){
+    //TODO::如果要支持多个节点同时加入的话，这里需要进行判断可能会有多 AddNodeReq 进来，数据切分的时候可能会有问题
+    //我们这里通过外部操作来保证一次只有一个节点加入
+    auto ip = req->ip();
+    auto port = req->port();
+    auto pos = req->pos();
+    auto pre_node_ip_port_tmp = ip+":"+port;
+    //新加入节点点，得切分数据的状态
+    if(req->join_node()){
+      //标记系统状态
+      SystemStatus.store(1);
+      //TODO 先简单的实现，直接把数据遍历然后拆分一份
+      //后面这里得是拆分成 2^mbit 个 shard 的形式
+      auto& inner_map = kv_store_p_->split_inner_cache();
+      //std::decay<decltype(inner_map)>::type pre_node_values;
+      uint64_t key_hash_value;
+      {
+        std::shared_lock<std::shared_mutex> r_lock(kv_store_p_->get_inner_cache_lock());
+        for(auto& val : inner_map){
+          key_hash_value = MurmurHash64B(val.first.c_str(), val.first.length()) % virtual_node_num_;
+          if( !in_range(key_hash_value, pos)){
+            reply->add_key(val.first);
+            reply->add_value(val.second.second);
+            reply->add_expire_time(val.second.first);
+          }
+        }
+      }
+      //发送数据
+      if(pre_node_ip_port_tmp != cur_host_port_+":"+cur_host_port_){
+        pre_CH_client_ = std::make_unique<Bicache::ConsistentHash::Stub>(grpc::CreateChannel(
+          pre_node_ip_port_tmp, grpc::InsecureChannelCredentials()));
+      }
+      pre_node_ = req->pos();
+      pre_node_ip_port_ = pre_node_ip_port_tmp;
+      pos2host_[pre_node_] = pre_node_ip_port_;
+      sleep(1);
+      SystemStatus.store(0);
+    }else{
+      //周期性的更新数据
+
+    }
+    info("{} GetData from {}: send {} keys ", cur_pos_, req->pos(), reply->key_size());
+    return {grpc::StatusCode::OK, ""};
 }
 
 Status CH_node_impl::FindPreDecessor(::grpc::ServerContext* context, const ::Bicache::FindPreDecessorRequest* req, ::Bicache::FindPreDecessorReply* reply){
@@ -328,6 +379,7 @@ bool CH_node_impl::find_successor(int node, int pos, int& successor){
     }
   }while(true);
 }
+
 const std::vector<Bicache::FingerItem>& CH_node_impl::get_finger_table()const{
   return finger_table_;
 }
@@ -392,7 +444,37 @@ int CH_node_impl::add_node_req(){
       //TODO:: 这里要填充  pos2host
     }
     // 与上一个节点建立连接
+    // 从上一个节点获取数据
+    Bicache::GetDataRequest getDataReq;
+    getDataReq.set_ip(cur_host_ip_);
+    getDataReq.set_port(cur_host_port_);
+    getDataReq.set_pos(cur_pos_);
+    getDataReq.set_join_node(true);
+    Bicache::GetDataReply getDataReply;
+    grpc::ClientContext ctx;
+    auto status = CH_client_->GetData(&ctx, getDataReq, &getDataReply);
     // 这里应该是第一个 set pre_node_ip_port 的位置
+    //get_writable_inner_cache
+    {
+      auto& inner_cache = kv_store_p_->get_mutable_inner_cache();
+      auto curr_ts = get_miliseconds();
+      uint64_t expire_time = 0;
+      std::string key;
+      std::string value;
+      int valid_keys = 0;
+      std::unique_lock<std::shared_mutex> w_lock(kv_store_p_->get_inner_cache_lock());
+      for(auto i =0 ;i<getDataReply.key_size();i++){
+        //每次都获取时间其实也是非常的耗时的，所以采用一种优化的方式
+        if(i%10==0){
+          curr_ts = get_miliseconds();
+        }
+        if(getDataReply.expire_time(i)< curr_ts){
+          inner_cache[getDataReply.key(i)]=std::make_pair(getDataReply.expire_time(i), getDataReply.value(i));
+          valid_keys++;
+        }
+      }
+      info("get {} valid keys from next node({} in total)", valid_keys, getDataReply.key_size());
+    }
     auto pre_node_ip_port_tmp = reply.pre_node_ip_port();
     if(!pre_node_ip_port_tmp.empty()){
       pre_CH_client_ = std::make_unique<Bicache::ConsistentHash::Stub>(grpc::CreateChannel(
@@ -429,6 +511,10 @@ void CH_node_impl::run(){
     }
     retry++;
   }while(retry<3);
+}
+
+void CH_node_impl::set_kv_store_p(KV_store_impl* kv_store){
+  kv_store_p_ = kv_store;
 }
 
 void CH_node_impl::stablize(){
@@ -546,16 +632,35 @@ void CH_node_impl::HB_to_proxy(){
   }
 }
 
-bool CH_node_impl::in_range(const uint32_t pos)const{
+bool CH_node_impl::in_range(const uint32_t pos, const uint32_t begin_pos)const{
   // 利用 range 来进行判断
-  uint32_t range =(next_pos_ + virtual_node_num_ - cur_pos_) % virtual_node_num_;
+  uint32_t range =( virtual_node_num_ + cur_pos_ - begin_pos + 1) % virtual_node_num_;
   if(range == 0){
+    debug("0:{} in my range({}, {})", pos, begin_pos, cur_pos_);
     return true;
   }
-  uint32_t actu_range =(pos + virtual_node_num_ - cur_pos_) % virtual_node_num_;
+  uint32_t actu_range =( virtual_node_num_ + cur_pos_ - pos + 1) % virtual_node_num_;
   if(actu_range <= range){
+    debug("{} in my range({}, {})", pos, begin_pos, cur_pos_);
     return true;
   }else{
+    debug("NOT {} in my range({}, {})", pos, begin_pos, cur_pos_);
+    return false;
+  }}
+
+bool CH_node_impl::in_range(const uint32_t pos)const{
+  // 利用 range 来进行判断
+  uint32_t range =( virtual_node_num_ + cur_pos_ - pre_node_ + 1) % virtual_node_num_;
+  if(range == 0){
+    debug("0:{} in my range({}, {}", pos, pre_node_, cur_pos_);
+    return true;
+  }
+  uint32_t actu_range =( virtual_node_num_ + cur_pos_ - pos + 1) % virtual_node_num_;
+  if(actu_range <= range){
+    debug("{} in my range({}, {}", pos, pre_node_, cur_pos_);
+    return true;
+  }else{
+    debug("NOT {} in my range({}, {}", pos, pre_node_, cur_pos_);
     return false;
   }
 }

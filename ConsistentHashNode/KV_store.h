@@ -28,6 +28,8 @@ using spdlog::info;
 using spdlog::warn;
 using spdlog::critical;
 
+using cache_type = std::unordered_map<std::string, std::pair<uint64_t, std::string>>;
+
 
 class KV_store_impl : public Bicache::KV_service::Service {
 public:
@@ -40,6 +42,9 @@ public:
     virtual ::grpc::Status Set(::grpc::ServerContext* context, const ::Bicache::SetRequest* req, ::Bicache::SetReply* rsp)override;
 
     void init();
+    const cache_type& split_inner_cache();
+    cache_type& get_mutable_inner_cache();
+    std::shared_mutex& get_inner_cache_lock();
     static void run();
     void backend_update();
     ~KV_store_impl();
@@ -56,12 +61,16 @@ private:
     std::shared_mutex rw_lock_for_ids_;
     std::unordered_map<uint32_t, uint64_t> req_ids_;
 
+    // 0:正常 1: 有节点加入
+    std::atomic<int> node_status_change_flag;
+    int node_added = 0;
+    //感觉是不用知道加入的 ip，让下层服务来处理就好了
+    int node_added_ip_port = 0;
     //后面可以尝试 junction 仓库
     using timed_key = std::pair<uint64_t, std::unordered_map<std::string, std::pair<uint64_t, std::string>>::iterator >;
-    using cache_type = std::unordered_map<std::string, std::pair<uint64_t, std::string>>;
 
     std::shared_mutex rw_lock_for_cache_;
-    std::unordered_map<std::string, std::pair<uint64_t, std::string>> inner_cache_;
+    cache_type inner_cache_;
 
     struct timed_key_order {
         bool operator()(const timed_key& lhs, const timed_key& rhs) const { return lhs.first > rhs.first; }

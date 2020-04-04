@@ -5,6 +5,7 @@
 #include <string>
 #include <thread>
 #include <unistd.h>
+#include <cstdio>
 
 #include <grpcpp/grpcpp.h>
 
@@ -218,5 +219,22 @@ int main(int argc, char** argv) {
     kvc.Get(key);
     usleep(400000);
   }
+  char input_char='s';
+  int i = 15;
+  do{
+    if(input_char == 's'){
+      std::string key = getRandStr(16);
+      std::string value = getRandStr(16);
+      keys.push_back(key);
+      values.push_back(value);
+      kvc.Set(key, value);
+      i++;
+    }else if(input_char == 'g'){
+      std::string key = keys[i];
+      kvc.Get(key);
+    }
+    input_char = getchar();
+    input_char = getchar();
+  }while(input_char!='\n');
   return 0;
 }
