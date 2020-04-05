@@ -30,6 +30,8 @@ message RegisterRequest{
   string ip = 1;
   string port = 2;
   string kv_port = 3;
+  //indicate whether it has already got the data.
+  int32 pos = 4;
 //  optional range
 //  uint64 range_end = 3;
 //  uint64 total_range= 4;

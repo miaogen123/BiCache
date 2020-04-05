@@ -44,6 +44,12 @@ Status ProxyServerImpl::Register(ServerContext* context, const RegisterRequest* 
     int pos = 0;
     int retry_count = 0;
     do{
+        if(req->pos()!=-1){
+            pos2host_.insert({pos, ip_port_origin});
+            pos2kvhost_.insert({pos, ip+":"+req->kv_port()});
+            host2pos_.insert({ip_port_origin, pos});
+            break;
+        }
         retry_count++;
         pos = MurmurHash64B(ip_port_hash.c_str(), ip_port_hash.length()) % virtual_node_num_;
         {
@@ -59,40 +65,49 @@ Status ProxyServerImpl::Register(ServerContext* context, const RegisterRequest* 
                 continue;
             } else {
                 //FIXME:::已经存在的节点，重新加入时，应该如何处理
-                pos2host_.insert({pos, ip_port_origin});
-                pos2kvhost_.insert({pos, ip+":"+req->kv_port()});
-                host2pos_.insert({ip_port_origin, pos});
+                //放在前面 req->pos != -1 的时候里面了，因为节点只有在拿到数据以后才能加入到 proxy， 
+            //    pos2host_.insert({pos, ip_port_origin});
+            //    pos2kvhost_.insert({pos, ip+":"+req->kv_port()});
+            //    host2pos_.insert({ip_port_origin, pos});
                 break;
             }
         }
     } while (true);
+
     // get next node;
     auto ite_upper = pos2host_.upper_bound(pos);
     if(ite_upper != pos2host_.end()){
         reply->set_next_node_ip_port(ite_upper->second);
         reply->set_next_node_pos(ite_upper->first);
     } else {
-        auto ite_first_pos = pos2host_.cbegin();
-        reply->set_next_node_ip_port(ite_first_pos->second);
-        reply->set_next_node_pos(ite_first_pos->first);
+        if(pos2host_.size()==0){
+            reply->set_next_node_ip_port(ip_port_origin);
+            reply->set_next_node_pos(pos);
+        }else{
+            auto ite_first_pos = pos2host_.cbegin();
+            reply->set_next_node_ip_port(ite_first_pos->second);
+            reply->set_next_node_pos(ite_first_pos->first);
+        }
     }
     //reply->set_next_node_pos(ite_upper->first);
     reply->set_total_range(virtual_node_num_);
     reply->set_pos(pos);
     
-    info("receive register: {}:{}, get pos:{} next pos {}, next host {}", ip, port, pos,  reply->next_node_pos(), reply->next_node_ip_port());
+    info("receive register: type: {}, {}:{}, get pos:{} next pos {}, next host {}",req->pos()==-1?"ToGetPos":"AlreadyGetData", ip, port, pos,  reply->next_node_pos(), reply->next_node_ip_port());
 
     //record the node
-    uint64_t seconds = get_miliseconds()+3000;
-    pos_HB_lock_.lock();
-    auto ite_pos = pos_HB_.find(pos);
-    if(ite_pos==pos_HB_.end()){
-        pos_HB_.insert({pos, seconds});
-    }else{
-        ite_pos->second = seconds;
+    if(req->pos()!=-1){
+        uint64_t seconds = get_miliseconds()+3000;
+        pos_HB_lock_.lock();
+        auto ite_pos = pos_HB_.find(pos);
+        if(ite_pos==pos_HB_.end()){
+            pos_HB_.insert({pos, seconds});
+        }else{
+            ite_pos->second = seconds;
+        }
+        debug("node {} register at {}", pos, seconds);
+        pos_HB_lock_.unlock();
     }
-    debug("node {} register at {}", pos, seconds);
-    pos_HB_lock_.unlock();
     return Status::OK;
 } 
 

@@ -60,6 +60,7 @@ public:
     Status HeartBeat(::grpc::ServerContext* context, const ::Bicache::HeartBeatRequest* request, ::Bicache::HeartBeatReply* response);
 
     int register_to_proxy(const std::string& host, const std::string& port);
+    void notify_to_proxy();
     int find_successor(int pos);
     // run 里面做一些必要的开始工作
     void run();

@@ -207,34 +207,33 @@ int main(int argc, char** argv) {
   kvc.GetTology();
   std::vector<std::string> keys;
   std::vector<std::string> values;
-  for(auto i = 0 ;i<16;i++){
+  for(auto i = 0 ;i<1;i++){
     std::string key = getRandStr(16);
     std::string value = getRandStr(16);
     keys.push_back(key);
     values.push_back(value);
     kvc.Set(key, value);
   }
-  for(auto i = 0 ;i<16;i++){
+  for(auto i = 0 ;i<1;i++){
     std::string key = keys[i];
     kvc.Get(key);
     usleep(400000);
   }
-  char input_char='s';
-  int i = 15;
+  int input_value=0;
+  int i = 0;
   do{
-    if(input_char == 's'){
+    if(input_value == 0){
       std::string key = getRandStr(16);
       std::string value = getRandStr(16);
       keys.push_back(key);
       values.push_back(value);
       kvc.Set(key, value);
       i++;
-    }else if(input_char == 'g'){
+    }else if(input_value == 1){
       std::string key = keys[i];
       kvc.Get(key);
     }
-    input_char = getchar();
-    input_char = getchar();
-  }while(input_char!='\n');
+    std::cin>>input_value;
+  }while(input_value!=2);
   return 0;
 }

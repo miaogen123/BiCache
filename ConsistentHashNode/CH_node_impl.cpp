@@ -48,12 +48,31 @@ CH_node_impl::CH_node_impl(Conf& conf){
   stablize_thr_ = std::make_shared<std::thread>(&CH_node_impl::stablize, this);
 }
 
+void CH_node_impl::notify_to_proxy(){
+  RegisterRequest req;
+  RegisterReply reply;
+  req.set_ip(cur_host_ip_);
+  req.set_port(cur_host_port_);
+  req.set_kv_port(kv_port_);
+  req.set_pos(cur_pos_);
+  ClientContext context;
+  auto status = proxy_client_->Register(&context, req, &reply);
+  if(status.ok()){
+    info("notify proxy SUCCESS, ready to service");
+  }else{
+    critical("notify proxy FAILED");
+    //TODO:: you should retry 
+    exit(-1);
+  }
+}
+
 int CH_node_impl::register_to_proxy(const std::string& host, const std::string& port){
   RegisterRequest req;
   RegisterReply reply;
   req.set_ip(host);
   req.set_port(port);
   req.set_kv_port(kv_port_);
+  req.set_pos(-1);
   ClientContext context;
   auto status = proxy_client_->Register(&context, req, &reply);
   if(status.ok()){
@@ -160,6 +179,7 @@ Status CH_node_impl::GetData(::grpc::ServerContext* context, const ::Bicache::Ge
         for(auto& val : inner_map){
           key_hash_value = MurmurHash64B(val.first.c_str(), val.first.length()) % virtual_node_num_;
           if( !in_range(key_hash_value, pos)){
+            debug("key {} pos is {}: to outter", val.first, key_hash_value);;
             reply->add_key(val.first);
             reply->add_value(val.second.second);
             reply->add_expire_time(val.second.first);
@@ -443,8 +463,9 @@ int CH_node_impl::add_node_req(){
       finger_table_.push_back(std::move(item));
       //TODO:: 这里要填充  pos2host
     }
-    // 与上一个节点建立连接
-    // 从上一个节点获取数据
+    // 过滤逻辑：当下一个节点与当前的相同的时候
+    // 与下一个节点建立连接
+    // 从下一个节点获取数据
     Bicache::GetDataRequest getDataReq;
     getDataReq.set_ip(cur_host_ip_);
     getDataReq.set_port(cur_host_port_);
@@ -475,6 +496,7 @@ int CH_node_impl::add_node_req(){
       }
       info("get {} valid keys from next node({} in total)", valid_keys, getDataReply.key_size());
     }
+    notify_to_proxy();
     auto pre_node_ip_port_tmp = reply.pre_node_ip_port();
     if(!pre_node_ip_port_tmp.empty()){
       pre_CH_client_ = std::make_unique<Bicache::ConsistentHash::Stub>(grpc::CreateChannel(
@@ -636,15 +658,12 @@ bool CH_node_impl::in_range(const uint32_t pos, const uint32_t begin_pos)const{
   // 利用 range 来进行判断
   uint32_t range =( virtual_node_num_ + cur_pos_ - begin_pos + 1) % virtual_node_num_;
   if(range == 0){
-    debug("0:{} in my range({}, {})", pos, begin_pos, cur_pos_);
     return true;
   }
   uint32_t actu_range =( virtual_node_num_ + cur_pos_ - pos + 1) % virtual_node_num_;
   if(actu_range <= range){
-    debug("{} in my range({}, {})", pos, begin_pos, cur_pos_);
     return true;
   }else{
-    debug("NOT {} in my range({}, {})", pos, begin_pos, cur_pos_);
     return false;
   }}
 
@@ -652,15 +671,12 @@ bool CH_node_impl::in_range(const uint32_t pos)const{
   // 利用 range 来进行判断
   uint32_t range =( virtual_node_num_ + cur_pos_ - pre_node_ + 1) % virtual_node_num_;
   if(range == 0){
-    debug("0:{} in my range({}, {}", pos, pre_node_, cur_pos_);
     return true;
   }
   uint32_t actu_range =( virtual_node_num_ + cur_pos_ - pos + 1) % virtual_node_num_;
   if(actu_range <= range){
-    debug("{} in my range({}, {}", pos, pre_node_, cur_pos_);
     return true;
   }else{
-    debug("NOT {} in my range({}, {}", pos, pre_node_, cur_pos_);
     return false;
   }
 }
