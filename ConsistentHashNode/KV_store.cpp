@@ -173,7 +173,7 @@ void KV_store_impl::run_CH_node(){
 }
 
 void KV_store_impl::backend_update(){
-  info("KV:start cleaning: cleaning interval = 2s, info log interval = 10s");
+  info("KV:start cleaning: cleaning interval = {}, info log interval = 30*interval", clean_interval_);
   //TODO::这里先清理reqids，后面添加了 key 超时以后再设置 key 清理的逻辑
   int count = 0;
   int expire_clean_count = 0;
@@ -212,7 +212,6 @@ void KV_store_impl::backend_update(){
             }
         }
       }
-
 //TEST
 //  while (!expire_queue_.empty()) {
 //      const timed_key& tk = expire_queue_.top();
@@ -222,8 +221,8 @@ void KV_store_impl::backend_update(){
 //      expire_queue_.pop();
 //  }
 
-      if(count==60){
-        info("KV:clean log: clean {} expire req_ids_", expire_clean_count++);
+      if(count==30){
+        info("KV:clean log: clean {} expire req_ids_, keysize {}", expire_clean_count++, inner_cache_.size());
         count=0;
         expire_clean_count=0;
       }

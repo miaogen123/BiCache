@@ -172,7 +172,7 @@ public:
       if(status.error_code()==grpc::StatusCode::UNAVAILABLE){
         GetTology();
       }
-      critical("Get req failed, error msg: {}", status.error_message());
+      critical("Set req failed, error msg: {}", status.error_message());
       return -1;
     }
     if(!rsp.is_set()){
@@ -181,7 +181,7 @@ public:
       return -1;
     }
     // only for debug
-    info("set key {}: value {} from pos {}", key, rsp.value(), key_successor);
+    info("set key {}: value {} from pos {}", key, value, key_successor);
     return 0;
   }
 private:
@@ -205,6 +205,8 @@ int main(int argc, char** argv) {
   expire_time = atoi(conf.get("expire_time", "20000").c_str());
   KV_client kvc(conf);
   kvc.GetTology();
+  
+
   std::vector<std::string> keys;
   std::vector<std::string> values;
   for(auto i = 0 ;i<1;i++){
@@ -222,18 +224,27 @@ int main(int argc, char** argv) {
   int input_value=0;
   int i = 0;
   do{
+    std::string key;
+    std::string value;
     if(input_value == 0){
-      std::string key = getRandStr(16);
-      std::string value = getRandStr(16);
+      key = getRandStr(16);
+      value = getRandStr(16);
       keys.push_back(key);
       values.push_back(value);
       kvc.Set(key, value);
       i++;
     }else if(input_value == 1){
-      std::string key = keys[i];
+      key = keys[i];
       kvc.Get(key);
+    }else if(input_value == 2  ){
+      std::cin>>key;
+      kvc.Get(key);
+    }else if(input_value = 3){
+      std::cin >> key ;
+      std::cin >> value ;
+      kvc.Set(key, value);
     }
     std::cin>>input_value;
-  }while(input_value!=2);
+  }while(input_value!=9);
   return 0;
 }

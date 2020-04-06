@@ -180,11 +180,13 @@ Status CH_node_impl::GetData(::grpc::ServerContext* context, const ::Bicache::Ge
         std::shared_lock<std::shared_mutex> r_lock(kv_store_p_->get_inner_cache_lock());
         for(auto& val : inner_map){
           key_hash_value = MurmurHash64B(val.first.c_str(), val.first.length()) % virtual_node_num_;
-          if( !in_range(key_hash_value, pos)){
+          if(in_range(key_hash_value)  && !in_range(key_hash_value, pos)){
             debug("key {} pos is {}: to outter", val.first, key_hash_value);;
             reply->add_key(val.first);
             reply->add_value(val.second.second);
             reply->add_expire_time(val.second.first);
+          }else{
+            //debug("key {} pos {} ISN’T ", val.first, key_hash_value);;
           }
         }
       }
@@ -346,7 +348,7 @@ bool CH_node_impl::find_successor(int node, int pos, int& successor){
       successor = ret;
       return true;
     }
-    info("{} close to {} is {}, ret = {}", node, pos, close_one, ret);
+    //debug("{} close to {} is {}, ret = {}", node, pos, close_one, ret);
   }
 
   
@@ -492,9 +494,11 @@ int CH_node_impl::add_node_req(){
           curr_ts = get_miliseconds();
         }
         expire_time = getDataReply.expire_time(i);
-        if(expire_time == 0 || expire_time < curr_ts){
+        if(expire_time == 0 || expire_time > curr_ts){
           inner_cache[getDataReply.key(i)]=std::make_pair(getDataReply.expire_time(i), getDataReply.value(i));
           valid_keys++;
+        }else{
+          debug("key {} value {} expire {}, FAILED TO ADD", getDataReply.key(i), getDataReply.value(i), getDataReply.expire_time(i));
         }
       }
       info("get {} valid keys from next node({} in total)", valid_keys, getDataReply.key_size());
@@ -659,29 +663,52 @@ void CH_node_impl::HB_to_proxy(){
 
 bool CH_node_impl::in_range(const uint32_t pos, const uint32_t begin_pos)const{
   // 利用 range 来进行判断
-  uint32_t range =( virtual_node_num_ + cur_pos_ - begin_pos + 1) % virtual_node_num_;
-  if(range == 0){
-    return true;
-  }
-  uint32_t actu_range =( virtual_node_num_ + cur_pos_ - pos + 1) % virtual_node_num_;
-  if(actu_range <= range){
-    return true;
+  auto start_pos = (begin_pos + 1)%virtual_node_num_; 
+  if(cur_pos_ >= start_pos){
+    if(pos >= start_pos &&pos<= cur_pos_){
+      return true;
+    }
   }else{
-    return false;
-  }}
+    if(pos >= start_pos || pos <= cur_pos_){
+      return true;
+    }
+  }
+  return false;
+//  uint32_t range =( virtual_node_num_ + cur_pos_ - begin_pos + 1) % virtual_node_num_;
+//  if(range == 0){
+//    return true;
+//  }
+//  uint32_t actu_range =( virtual_node_num_ + cur_pos_ - pos + 1) % virtual_node_num_;
+//  if(actu_range <= range){
+//    return true;
+//  }else{
+//    return false;
+//  }
+  }
 
 bool CH_node_impl::in_range(const uint32_t pos)const{
   // 利用 range 来进行判断
-  uint32_t range =( virtual_node_num_ + cur_pos_ - pre_node_ + 1) % virtual_node_num_;
-  if(range == 0){
-    return true;
-  }
-  uint32_t actu_range =( virtual_node_num_ + cur_pos_ - pos + 1) % virtual_node_num_;
-  if(actu_range <= range){
-    return true;
+  auto start_pos = (pre_node_ + 1)%virtual_node_num_;
+  if(cur_pos_ >= start_pos){
+    if(pos >= start_pos &&pos<= cur_pos_){
+      return true;
+    }
   }else{
-    return false;
+    if(pos >= start_pos || pos <= cur_pos_){
+      return true;
+    }
   }
+  return false;
+  //uint32_t range =( virtual_node_num_ + cur_pos_ - pre_node_ + 1) % virtual_node_num_;
+  //if(range == 0){
+    //return true;
+  //}
+  //uint32_t actu_range =( virtual_node_num_ + cur_pos_ - pos + 1) % virtual_node_num_;
+  //if(actu_range <= range){
+    //return true;
+  //}else{
+    //return false;
+  //}
 }
 
 CH_node_impl::~CH_node_impl(){
