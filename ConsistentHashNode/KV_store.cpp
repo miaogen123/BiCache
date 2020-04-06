@@ -103,7 +103,7 @@ int KV_store_impl::is_valid(uint64_t& timestamp, int& req_id, uint64_t& key_pos,
 
 ::grpc::Status KV_store_impl::Set(::grpc::ServerContext* context, const ::Bicache::SetRequest* req, ::Bicache::SetReply* rsp){
   if(SystemStatus.load()!=0){
-    info("system status is {}", SystemStatus.load());
+    info("KV:system status is {}", SystemStatus.load());
     return {grpc::StatusCode::ABORTED, "system is maintaning"};
   }
   uint64_t key_pos = req->pos_of_key();
@@ -169,6 +169,7 @@ void KV_store_impl::run_CH_node(){
   std::unique_ptr<grpc::Server> server(builder.BuildAndStart());
   spdlog::info("KV:CH node listening on {}", server_address);
   ch_node_->run();
+  virtual_node_num_ = ch_node_->get_virtual_node_num_();
   server->Wait();
 }
 
@@ -182,36 +183,61 @@ void KV_store_impl::backend_update(){
     usleep(clean_interval_);
     {
       std::unique_lock<std::shared_mutex> w_lock_for_ids(rw_lock_for_ids_);
-        auto cur_miliseconds = get_miliseconds();
-        //2s内的请求应该不多，直接遍历就好  
-        //TODO::这里看后面吧，要是影响比较大，就不写了。不多个锤子很多的
-        for(auto ite = req_ids_.begin();ite!= req_ids_.end();){
-          if(ite->second < cur_miliseconds){
-            ite = req_ids_.erase(ite);
-            expire_clean_count++;
-          }else{
-            ite++;
+      auto cur_miliseconds = get_miliseconds();
+      //2s内的请求应该不多，直接遍历就好  
+      //TODO::这里看后面吧，要是影响比较大，就不写了。不多个锤子很多的
+      for(auto ite = req_ids_.begin();ite!= req_ids_.end();){
+        if(ite->second < cur_miliseconds){
+          ite = req_ids_.erase(ite);
+          expire_clean_count++;
+        }else{
+          ite++;
+        }
+      }
+    }
+    uint64_t curr_ts = get_miliseconds();
+    {
+      std::unique_lock<std::shared_mutex> lock(rw_lock_for_cache_);
+      while (!expire_queue_.empty()) {
+          const timed_key& tk = expire_queue_.top();
+          //debug("KV:tk {} second {} {} {} {}", tk.first, tk.second->first, tk.second->second.first, tk.second->second.second, curr_ts);
+          if (tk.first < curr_ts) {
+              auto it = tk.second;
+              if (it != inner_cache_.end() && it->second.first < curr_ts) {
+                  info("KV:clean {} value {} timestamp {} cur {} queue.size{}", it->first, it->second.second, it->second.first, curr_ts, expire_queue_.size());
+                  inner_cache_.erase(it);
+              }
+              expire_queue_.pop();
+          } else {
+              break;
           }
+      }
+    }
+
+    //clean the keys not in my range() and  not in prenode 
+    //note: case(keys not in my range usually)happens when node joins, because node joins not so frequently, 
+    //this operation run a few
+    if(count == 20 && ch_node_->get_pp_node()!=-1){
+      std::vector<cache_type::iterator> ite_to_be_deleted;
+      std::shared_lock<std::shared_mutex> r_lock(rw_lock_for_cache_);
+      for(auto ite = inner_cache_.begin();ite!=inner_cache_.end();ite++) {
+        //TODO:: this can be optimized 
+        auto key_pos = MurmurHash64B(ite->first.c_str(), ite->first.size())%virtual_node_num_;
+        if(!ch_node_->in_range(key_pos, ch_node_->get_pp_node())){
+          ite_to_be_deleted.push_back(ite);
+        }else{
+          //test with a few of total keys
+          //debug(" key {} pos {} not in range {}", ite->first, key_pos, ch_node_->get_pp_node());
         }
       }
-      uint64_t curr_ts = get_miliseconds();
-      {
-        std::unique_lock<std::shared_mutex> lock(rw_lock_for_cache_);
-        while (!expire_queue_.empty()) {
-            const timed_key& tk = expire_queue_.top();
-            //debug("KV:tk {} second {} {} {} {}", tk.first, tk.second->first, tk.second->second.first, tk.second->second.second, curr_ts);
-            if (tk.first < curr_ts) {
-                auto it = tk.second;
-                if (it != inner_cache_.end() && it->second.first < curr_ts) {
-                    info("KV:clean {} value {} timestamp {} cur {} queue.size{}", it->first, it->second.second, it->second.first, curr_ts, expire_queue_.size());
-                    inner_cache_.erase(it);
-                }
-                expire_queue_.pop();
-            } else {
-                break;
-            }
-        }
+      r_lock.unlock();
+      std::shared_lock<std::shared_mutex> w_lock(rw_lock_for_cache_);
+      for(auto& ite:ite_to_be_deleted){
+        inner_cache_.erase(ite);
       }
+      info("KV:clean not-in-range keys periodically: {}", ite_to_be_deleted.size());
+    }
+
 //TEST
 //  while (!expire_queue_.empty()) {
 //      const timed_key& tk = expire_queue_.top();

@@ -22,7 +22,7 @@ cmake_minimum_required(VERSION 3.1)
 project(Bicache C CXX)
 
 if(NOT MSVC)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17")
 else()
   add_definitions(-D_WIN32_WINNT=0x600)
 endif()

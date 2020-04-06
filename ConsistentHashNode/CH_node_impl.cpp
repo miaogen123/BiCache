@@ -699,16 +699,17 @@ bool CH_node_impl::in_range(const uint32_t pos)const{
     }
   }
   return false;
-  //uint32_t range =( virtual_node_num_ + cur_pos_ - pre_node_ + 1) % virtual_node_num_;
-  //if(range == 0){
-    //return true;
-  //}
-  //uint32_t actu_range =( virtual_node_num_ + cur_pos_ - pos + 1) % virtual_node_num_;
-  //if(actu_range <= range){
-    //return true;
-  //}else{
-    //return false;
-  //}
+}
+
+int CH_node_impl::get_pre_node()const{
+  return pre_node_;
+}
+int CH_node_impl::get_pp_node()const{
+  return pp_pos_;
+}
+
+int CH_node_impl::get_virtual_node_num_()const{
+  return virtual_node_num_;
 }
 
 CH_node_impl::~CH_node_impl(){

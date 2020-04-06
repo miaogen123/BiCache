@@ -70,6 +70,9 @@ public:
     //for upper service
     bool in_range(const uint32_t pos, const uint32_t begin_pos)const;
     bool in_range(const uint32_t pos)const;
+    int get_pre_node()const;
+    int get_pp_node()const;
+    int get_virtual_node_num_()const;
     int find_closest_preceding_finger(int pos, int& close_one, const std::vector<Bicache::FingerItem>& finger_table);
     const std::vector<Bicache::FingerItem>& get_finger_table()const;
     
@@ -104,7 +107,7 @@ private:
     //TODO::后面有扩展的想法在搞这个吧，我这里就用简单的上一个节点好了。
     //std::vector<int> pre_node_list;
     //std::vector<std::string> pre_node_ipport_list;
-    int pp_pos_;
+    int pp_pos_ = -1;
     std::string pp_node_ip_port_;
     std::unique_ptr<Bicache::ProxyServer::Stub> proxy_client_;
     std::unique_ptr<Bicache::ConsistentHash::Stub> CH_client_;

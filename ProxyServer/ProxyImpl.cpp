@@ -2,6 +2,7 @@
 #include <unistd.h>
 #include "ProxyImpl.h"
 #include <chrono>
+#include <shared_mutex>
 #include "../utils/log.h"
 
 namespace Bicache{
@@ -9,7 +10,7 @@ namespace Bicache{
 using grpc::StatusCode;
 
 //静态成员初始化
-std::mutex ProxyServerImpl::add_node_lock_;
+
 uint64_t get_miliseconds(){
     using namespace std::chrono;
     steady_clock::duration d;
@@ -136,7 +137,7 @@ Status ProxyServerImpl::GetConfig(ServerContext* context, const GetConfigRequest
         }
     }
     reply->set_virtual_node_num(virtual_node_num_);
-    info("client getConfig from {}", context->peer());
+    info("client getConfig from {}, host size {}", context->peer(), pos2kvhost_.size());
     return grpc::Status{grpc::StatusCode::OK, ""};
 }
 
@@ -158,8 +159,8 @@ void ProxyServerImpl::backend_update(){
                     host2pos_.erase(host_ptr->second);
                     pos2kvhost_.erase(host_ptr->first);
                     pos2host_.erase(host_ptr);
+                    warn("from proxy erase node {}: current time {}, node register time {}", host_ptr->first, seconds, ite->second);
                 }
-                warn("from proxy erase node {}: current time {}, node register time {}", host_ptr->first, seconds, ite->second);
                 add_node_lock_.unlock();
                 ite=pos_HB_.erase(ite);
             }else{
@@ -176,3 +177,5 @@ ProxyServerImpl::~ProxyServerImpl(){
 }
 
 }
+
+std::mutex Bicache::ProxyServerImpl::add_node_lock_;

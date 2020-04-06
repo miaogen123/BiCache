@@ -13,6 +13,7 @@
 #include "CH_node_impl.h"
 #include "../utils/log.h"
 #include "../utils/conf.h"
+#include "../MyUtils/cpp/hash.h"
 #include "CH_node_impl.h"
 #include "spdlog/spdlog.h"
 #include <grpcpp/grpcpp.h>
@@ -61,7 +62,9 @@ private:
     std::shared_mutex rw_lock_for_ids_;
     std::unordered_map<uint32_t, uint64_t> req_ids_;
 
+    int virtual_node_num_=0;
     // 0:正常 1: 有节点加入
+    // 这两个flag应该是没有用过
     std::atomic<int> node_status_change_flag;
     int node_added = 0;
     //感觉是不用知道加入的 ip，让下层服务来处理就好了

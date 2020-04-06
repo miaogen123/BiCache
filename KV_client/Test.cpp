@@ -4,6 +4,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <shared_mutex>
 #include <unistd.h>
 #include <cstdio>
 
@@ -58,6 +59,7 @@ public:
     Bicache::GetConfigRequest req;
     Bicache::GetConfigReply rsp;
     auto status = proxy_client_->GetConfig(&ctx, req, &rsp);
+    std::unique_ptr<PosClientType> pos2kvclient_ptr_tmp(new PosClientType());
     if(!status.ok()){
       warn("get config from {} failed", proxy_ip_port_);
     }else{
@@ -65,26 +67,28 @@ public:
         critical("get unequally size from config, aborted");
         exit(1);
       }else{
+        std::unique_lock<std::shared_mutex> w_lock(rw_lock_for_pos2host_);
+        pos2host_.clear();
         for(auto i=0;i<rsp.pos_list_size();i++){
           auto pos = rsp.pos_list(i);
           auto host = rsp.ip_port_list(i);
           pos2host_[pos]=host;
+          info("pos {}, host {}", pos, host);
+          auto proxy_client = std::make_shared<Bicache::KV_service::Stub>(grpc::CreateChannel(
+              host, grpc::InsecureChannelCredentials()));
+          (*pos2kvclient_ptr_tmp)[pos]= proxy_client; 
         }
         virtual_node_num_ = rsp.virtual_node_num();
         info("get config successfully, node size {}", pos2host_.size());
       }
     }
-    std::unique_ptr<PosClientType> pos2kvclient_ptr_tmp(new PosClientType());
-    for(auto& pair : pos2host_){
-      auto proxy_client = std::make_shared<Bicache::KV_service::Stub>(grpc::CreateChannel(
-          pair.second, grpc::InsecureChannelCredentials()));
-      (*pos2kvclient_ptr_tmp)[pair.first]= proxy_client; 
-    }
+    //用指针可以避免加锁
     pos2kvclient_ptr_.swap(pos2kvclient_ptr_tmp);
   }
 
   uint32_t get_key_successor(const std::string& key, uint32_t& key_pos){
     key_pos = MurmurHash64B(key.c_str(), key.length()) % virtual_node_num_;
+    std::shared_lock<std::shared_mutex> w_lock(rw_lock_for_pos2host_);
     auto ite_lower = pos2host_.lower_bound(key_pos);
     uint32_t successor = 0;
     if(ite_lower == pos2host_.end()){
@@ -106,6 +110,8 @@ public:
     if(ite_client == (*pos2kvclient_ptr_).end()){
       warn("no client of pos {}", key_successor);
       return "";
+    }else{
+      info("get client of pos {}, key {}", key_successor, key);
     }
     auto kv_client = ite_client->second;
     Bicache::GetRequest req;
@@ -127,6 +133,7 @@ public:
     if(rsp.is_found()){
       info("get key {}: value {} from pos {}", key, rsp.value(), key_successor);
     }else{
+      info("404 get failed", key, rsp.value(), key_successor);
       if(rsp.status_code()==-3){
         warn("this node can't found, jump to {}", rsp.close_pos());
         //待完成
@@ -187,6 +194,7 @@ public:
 private:
   uint32_t virtual_node_num_;
   std::string proxy_ip_port_;
+  std::shared_mutex rw_lock_for_pos2host_;
   std::map<uint32_t, std::string> pos2host_;
   std::shared_ptr<Bicache::ProxyServer::Stub> proxy_client_;
   //这里到不同的节点的client，用指针存储效果会更好，unique_ptr存储的话，就不要读写锁了
