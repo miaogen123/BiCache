@@ -94,6 +94,8 @@ int CH_node_impl::register_to_proxy(const std::string& host, const std::string& 
       pre_node_ = cur_pos_;
       pos2host_[cur_pos_]=cur_host_ip_+":"+cur_host_port_;
       pre_node_ip_port_ = cur_host_ip_ +":"+cur_host_port_;
+      //first node notify to proxy
+      notify_to_proxy();
     }else{
       pos2host_[cur_pos_]=cur_host_ip_+":"+cur_host_port_;
       pos2host_[reply.next_node_pos()]= reply.next_node_ip_port();
@@ -489,7 +491,8 @@ int CH_node_impl::add_node_req(){
         if(i%10==0){
           curr_ts = get_miliseconds();
         }
-        if(getDataReply.expire_time(i)< curr_ts){
+        expire_time = getDataReply.expire_time(i);
+        if(expire_time == 0 || expire_time < curr_ts){
           inner_cache[getDataReply.key(i)]=std::make_pair(getDataReply.expire_time(i), getDataReply.value(i));
           valid_keys++;
         }

@@ -45,6 +45,7 @@ Status ProxyServerImpl::Register(ServerContext* context, const RegisterRequest* 
     int retry_count = 0;
     do{
         if(req->pos()!=-1){
+            pos = req->pos();
             pos2host_.insert({pos, ip_port_origin});
             pos2kvhost_.insert({pos, ip+":"+req->kv_port()});
             host2pos_.insert({ip_port_origin, pos});
