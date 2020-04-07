@@ -2,6 +2,7 @@
 #include <string>
 #include <memory>
 #include <mutex>
+#include <vector>
 #include <thread>
 #include <unordered_map>
 #include <algorithm>
@@ -31,6 +32,10 @@ using spdlog::critical;
 
 using cache_type = std::unordered_map<std::string, std::pair<uint64_t, std::string>>;
 
+struct BackupData{
+    std::shared_mutex lock;   
+    cache_type backup_cache;
+};
 
 class KV_store_impl : public Bicache::KV_service::Service {
 public:
@@ -43,9 +48,14 @@ public:
     virtual ::grpc::Status Set(::grpc::ServerContext* context, const ::Bicache::SetRequest* req, ::Bicache::SetReply* rsp)override;
 
     void init();
+
     const cache_type& split_inner_cache();
     cache_type& get_mutable_inner_cache();
     std::shared_mutex& get_inner_cache_lock();
+    BackupData& get_backup();
+    std::unique_ptr<std::vector<std::string>>& get_increment_data();
+    std::unique_ptr<std::vector<std::string>>& get_backup_increment_data();
+
     static void run();
     void backend_update();
     ~KV_store_impl();
@@ -62,6 +72,8 @@ private:
     std::shared_mutex rw_lock_for_ids_;
     std::unordered_map<uint32_t, uint64_t> req_ids_;
 
+    BackupData backup_;
+
     int virtual_node_num_=0;
     // 0:正常 1: 有节点加入
     // 这两个flag应该是没有用过
@@ -74,6 +86,9 @@ private:
 
     std::shared_mutex rw_lock_for_cache_;
     cache_type inner_cache_;
+    //to avoid read-write lock
+    std::unique_ptr<std::vector<std::string>> backup_increment_data_keys_;
+    std::unique_ptr<std::vector<std::string>> increment_data_keys_;
 
     struct timed_key_order {
         bool operator()(const timed_key& lhs, const timed_key& rhs) const { return lhs.first > rhs.first; }

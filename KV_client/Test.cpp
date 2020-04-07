@@ -133,7 +133,7 @@ public:
     if(rsp.is_found()){
       info("get key {}: value {} from pos {}", key, rsp.value(), key_successor);
     }else{
-      info("404 get failed", key, rsp.value(), key_successor);
+      info("404 not found", key, rsp.value(), key_successor);
       if(rsp.status_code()==-3){
         warn("this node can't found, jump to {}", rsp.close_pos());
         //待完成

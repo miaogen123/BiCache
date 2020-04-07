@@ -46,6 +46,7 @@ CH_node_impl::CH_node_impl(Conf& conf){
   }
   update_thr_ = std::make_shared<std::thread>(&CH_node_impl::HB_to_proxy, this);
   stablize_thr_ = std::make_shared<std::thread>(&CH_node_impl::stablize, this);
+  push_data_thr_ = std::make_shared<std::thread>(&CH_node_impl::push_increment_data, this);
 }
 
 void CH_node_impl::notify_to_proxy(){
@@ -156,6 +157,107 @@ Status CH_node_impl::AddNode(::grpc::ServerContext* context, const ::Bicache::Ad
   }
 }
 
+void CH_node_impl::push_increment_data(){
+  do{
+    usleep(push_data_interval_);
+    if(next_pos_ == cur_pos_){
+      continue;
+    }
+
+    auto& increment_data = kv_store_p_->get_increment_data();
+    auto& backup_increment_data = kv_store_p_->get_backup_increment_data();
+    std::unique_ptr<std::vector<std::string>> new_increment_data(new std::vector<std::string>());
+    //swap(increment_data, new_increment_data);
+    increment_data.swap(new_increment_data);
+    debug("Ser: backup data {} {}", kv_store_p_->get_backup_increment_data()->size(), new_increment_data->size());
+    debug("Ser: data {} {}", increment_data->size(), new_increment_data->size());
+
+    auto& inner_cache = kv_store_p_->get_mutable_inner_cache();
+    Bicache::PushDataRequest  pushDataReq;
+    Bicache::PushDataReply pushDataRsp;
+    pushDataReq.set_ip(cur_host_ip_);
+    pushDataReq.set_ip(kv_port_);
+    pushDataReq.set_pos(cur_pos_);
+    std::shared_lock<std::shared_mutex> r_lock(kv_store_p_->get_inner_cache_lock());
+    //备用队列（当上一次push请求失败时，这个队列内才会有数据
+    for(auto key : *backup_increment_data){
+      auto ite = inner_cache.find(key);
+      if(ite != inner_cache.end()){
+        pushDataReq.add_key(key);
+        pushDataReq.add_value(ite->second.second);
+        pushDataReq.add_expire_time(ite->second.first);
+      }
+    }
+    for(auto key : *new_increment_data){
+      auto ite = inner_cache.find(key);
+      if(ite != inner_cache.end()){
+        pushDataReq.add_key(key);
+        pushDataReq.add_value(ite->second.second);
+        pushDataReq.add_expire_time(ite->second.first);
+      }
+    }
+    r_lock.unlock();
+    pushDataReq.set_last_snapshot(cur_snapshot_for_main_);
+    grpc::ClientContext ctx;
+    auto status = CH_client_->PushIncrement(&ctx, pushDataReq, &pushDataRsp);
+    if(status.ok()){
+      cur_snapshot_for_main_++;
+      backup_increment_data->clear();
+      info("push data to {} ip {} success, snapshot {}, {} {}", next_pos_, next_node_ip_port_, cur_snapshot_for_main_, increment_data->size(), new_increment_data->size());
+    }else{
+      //rollback when failing to push,
+      for(auto& key:*new_increment_data){
+        backup_increment_data->emplace_back(key);
+      }
+      warn("push data to {} ip {} failed, snapshot {}, errmsg {}, backup incrementdata size {}, try again", next_pos_, next_node_ip_port_, cur_snapshot_for_main_, status.error_message(), backup_increment_data->size());
+    }
+  }while(true);
+}
+
+//接收来自上一个节点 push 的增量数据
+//TODO::就目前只有两个接口（实际上只有一个set matters）来说，是可以不考虑重复的请求的，但如果说要支持 add、sub 等接口，就不能这么搞了
+Status CH_node_impl::PushIncrement(::grpc::ServerContext* context, const ::Bicache::PushDataRequest* req, ::Bicache::PushDataReply* rsp){
+  if(req->pos() != pre_node_){
+    warn("Ser:PushIncrement with from {}, which is not my cai", req->pos());
+    return {grpc::StatusCode::ABORTED, "you're not pre node"};
+  }
+  //只有一个set的话对比snapshot的意义并不大，这里增加对比选项，主要是为了扩展性
+  if(req->last_snapshot() != cur_snapshot_for_backup_){
+    warn("Ser:PushIncrement with mismatch snapshot id {} (cur {}) from {}", req->last_snapshot(), cur_snapshot_for_backup_, req->pos());
+    return {grpc::StatusCode::ABORTED, "your snaphost id is identical with mine"};
+  }
+  auto& backup = kv_store_p_->get_backup();
+  {
+    auto curr_ts = get_miliseconds();
+    auto expire_time = curr_ts;
+    int valid_keys = 0;
+    std::shared_lock w_lock(backup.lock);
+    for(auto i = 0;i<req->key_size();i++){
+      if(i%10==0){
+        curr_ts = get_miliseconds();
+      }
+      expire_time = req->expire_time(i);
+      if(expire_time == 0 || expire_time > curr_ts){
+        auto ite= backup.backup_cache.find(req->key(i));
+        if(ite==backup.backup_cache.end()){
+          backup.backup_cache[req->key(i)]=std::make_pair(req->expire_time(i), req->value(i));
+        }else{
+          ite->second.first= req->expire_time(i);
+          ite->second.second= req->value(i);
+        }
+        valid_keys++;
+      }else{
+        //debug("key {} value {} expire {}, FAILED TO ADD", getDataReply.key(i), getDataReply.value(i), getDataReply.expire_time(i));
+      }
+    }
+    info("Ser: PushIncrement get {} valid keys from pre node({} in total), backup size {} snapshot {}", \
+      valid_keys, req->key_size(), backup.backup_cache.size(), cur_snapshot_for_backup_);
+  }
+  cur_snapshot_for_backup_++;
+  // backup 中的数据只有在前一个节点失联的时候才会
+  return {grpc::StatusCode::OK, ""};
+}
+
 // 二次请求，这个请求里面完成数据的迁移 以及节点的确认加入
 //这里要分成两部分，另外新开一个 AddNodeAck 接口
 //为什么不直接搞事情呢？分出一个 二次 确认的逻辑是为什么呢？
@@ -181,7 +283,7 @@ Status CH_node_impl::GetData(::grpc::ServerContext* context, const ::Bicache::Ge
         for(auto& val : inner_map){
           key_hash_value = MurmurHash64B(val.first.c_str(), val.first.length()) % virtual_node_num_;
           if(in_range(key_hash_value)  && !in_range(key_hash_value, pos)){
-            debug("key {} pos is {}: to outter", val.first, key_hash_value);;
+            //debug("key {} pos is {}: to outter", val.first, key_hash_value);;
             reply->add_key(val.first);
             reply->add_value(val.second.second);
             reply->add_expire_time(val.second.first);
@@ -197,6 +299,7 @@ Status CH_node_impl::GetData(::grpc::ServerContext* context, const ::Bicache::Ge
       }
       pre_node_ = req->pos();
       pre_node_ip_port_ = pre_node_ip_port_tmp;
+      cur_snapshot_for_backup_ =1;
       pos2host_[pre_node_] = pre_node_ip_port_;
       sleep(1);
       SystemStatus.store(0);
@@ -257,11 +360,14 @@ Status CH_node_impl::HeartBeat(::grpc::ServerContext* context, const ::Bicache::
   reply->set_pre_pos(pre_node_);
   reply->set_pre_node_ip_port(pre_node_ip_port_);
   //info(cur_pos_, context->peer()+" get HB from "+ std::to_string(req->pos()));
+  next_node_ip_port_ = req->host_ip()+":"+req->host_port();
   if(next_pos_!= req->pos()){
     info("get HB from different node: pre {}, after {}", next_pos_, req->pos());
     next_pos_ = req->pos();
+    CH_client_ = std::move(std::make_unique<Bicache::ConsistentHash::Stub>(grpc::CreateChannel(
+        next_node_ip_port_, grpc::InsecureChannelCredentials() )));
+    cur_snapshot_for_main_ =1;
   }
-  next_node_ip_port_ = req->host_ip()+":"+req->host_port();
 
   //这个地方可能会因为多线程的原因导致出错
   //如果 HB 来的比较早，这个地方可能会崩掉，所以最好还是一个个的节点的进行加入
@@ -498,10 +604,10 @@ int CH_node_impl::add_node_req(){
           inner_cache[getDataReply.key(i)]=std::make_pair(getDataReply.expire_time(i), getDataReply.value(i));
           valid_keys++;
         }else{
-          debug("key {} value {} expire {}, FAILED TO ADD", getDataReply.key(i), getDataReply.value(i), getDataReply.expire_time(i));
+          //debug("key {} value {} expire {}, FAILED TO ADD", getDataReply.key(i), getDataReply.value(i), getDataReply.expire_time(i));
         }
       }
-      info("get {} valid keys from next node({} in total)", valid_keys, getDataReply.key_size());
+      info("Ser:get {} valid keys from next node({} in total)", valid_keys, getDataReply.key_size());
     }
     notify_to_proxy();
     auto pre_node_ip_port_tmp = reply.pre_node_ip_port();

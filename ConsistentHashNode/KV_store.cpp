@@ -10,9 +10,11 @@
 extern std::atomic<int> SystemStatus;
 
 KV_store_impl::KV_store_impl(Conf& conf):inner_conf_(conf){
-    auto bucket_size = conf.get("bucket_size", "10000");
-    inner_cache_.reserve(atoi(bucket_size.c_str()));
-    inner_cache_["hello"]=std::make_pair<uint64_t, std::string>(get_miliseconds(), "world");
+  auto bucket_size = conf.get("bucket_size", "10000");
+  inner_cache_.reserve(atoi(bucket_size.c_str()));
+  inner_cache_["hello"]=std::make_pair<uint64_t, std::string>(get_miliseconds(), "world");
+  increment_data_keys_.reset(new std::vector<std::string>());
+  backup_increment_data_keys_.reset(new std::vector<std::string>());
 }
 
 void KV_store_impl::init(){
@@ -30,6 +32,19 @@ cache_type& KV_store_impl::get_mutable_inner_cache(){
 
 std::shared_mutex& KV_store_impl::get_inner_cache_lock(){
   return rw_lock_for_cache_;
+}
+
+BackupData& KV_store_impl::get_backup(){
+  return backup_;
+}
+std::unique_ptr<std::vector<std::string>>& KV_store_impl::get_increment_data(){
+  debug("KV:increment data size {}", increment_data_keys_->size());
+  return increment_data_keys_;
+}
+
+std::unique_ptr<std::vector<std::string>>& KV_store_impl::get_backup_increment_data(){
+  debug("KV:backup increment data size {}", backup_increment_data_keys_->size());
+  return backup_increment_data_keys_;
 }
 
 int KV_store_impl::is_valid(uint64_t& timestamp, int& req_id, uint64_t& key_pos, std::string& msg){
@@ -144,6 +159,7 @@ int KV_store_impl::is_valid(uint64_t& timestamp, int& req_id, uint64_t& key_pos,
       // update_time 为0 就设置成最大的
       ite->second.first = std::numeric_limits<uint64_t>::max();
     }
+    increment_data_keys_->push_back(key);
   }
   //流量小的时候可以，大的时候就不能打这种log了
   //info("KV:Get from ")

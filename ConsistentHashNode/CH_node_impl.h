@@ -35,6 +35,7 @@ struct nodeStatus{
     NodeStatus status;
 };
 
+
 // 0:normal work
 // 1:node adding
 // 2:node leaving
@@ -42,7 +43,6 @@ struct nodeStatus{
 static std::atomic<int> SystemStatus(0);
 //TODO::这个函数在ProxyImpl.cpp里面也有，代码略丑，待优化
 uint64_t get_miliseconds();
-
 
 class KV_store_impl;
 
@@ -57,8 +57,10 @@ public:
     Status GetData(::grpc::ServerContext* context, const ::Bicache::GetDataRequest* request, ::Bicache::GetDataReply* response)override;
     Status FindPreDecessor(::grpc::ServerContext* context, const ::Bicache::FindPreDecessorRequest* request, ::Bicache::FindPreDecessorReply* reply)override;
     //接收来自下游的信息（下游主动和上游进行通信）
-    Status HeartBeat(::grpc::ServerContext* context, const ::Bicache::HeartBeatRequest* request, ::Bicache::HeartBeatReply* response);
+    Status HeartBeat(::grpc::ServerContext* context, const ::Bicache::HeartBeatRequest* request, ::Bicache::HeartBeatReply* response)override;
+    Status PushIncrement(::grpc::ServerContext* context, const ::Bicache::PushDataRequest* request, ::Bicache::PushDataReply* response)override;
 
+    void push_increment_data();
     int register_to_proxy(const std::string& host, const std::string& port);
     void notify_to_proxy();
     int find_successor(int pos);
@@ -84,14 +86,17 @@ private:
     int add_node_req();
     bool find_successor(int pos, int node, int& successor);
 
-
     //上层服务的信息
     std::string kv_port_;
     //config 
+    int push_data_interval_ = 50000000;
     int stablize_interval_ = 1000000;
     bool exit_flag_ = false;
     KV_store_impl* kv_store_p_;
     //保留关于其他节点的信息
+    //初始为1（避免为0与一些默认值撞上）
+    uint64_t cur_snapshot_for_backup_ = 1;
+    uint64_t cur_snapshot_for_main_ = 1;
     int mbit;
     int virtual_node_num_;
     //这个命名也多少有点不一致
@@ -117,6 +122,7 @@ private:
     std::unordered_map<uint, std::string> pos2host_;
  
     //后台线程
+    std::shared_ptr<std::thread> push_data_thr_;
     std::shared_ptr<std::thread> stablize_thr_;
     std::shared_ptr<std::thread> update_thr_;
     // 记录前一个和后一个节点的状态(0和1)

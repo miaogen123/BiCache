@@ -21,8 +21,8 @@ service ProxyServer{
   // Sends a greeting
   rpc Register(RegisterRequest) returns (RegisterReply) {}
   rpc HeartBeat(ProxyHeartBeatRequest) returns (ProxyHeartBeatReply) {}
-  //不急着完成
   rpc GetConfig(GetConfigRequest) returns (GetConfigReply) {}
+  //rpc GetNodeStatus(GetNodeStatusRequest) returns (GetConfigReply) {}
 }
 
 // The request message containing the user's name.

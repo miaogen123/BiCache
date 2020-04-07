@@ -28,6 +28,7 @@ service ConsistentHash{
   rpc HeartBeat(HeartBeatRequest) returns (HeartBeatReply) {}
   rpc AddNode(AddNodeRequest) returns (AddNodeReply) {}
   rpc GetData(GetDataRequest) returns (GetDataReply) {}
+  rpc PushIncrement(PushDataRequest) returns (PushDataReply) {}
   rpc FindSuccessor(FindSuccRequest) returns (FindSuccReply) {}
   rpc FindPreDecessor(FindPreDecessorRequest) returns (FindPreDecessorReply) {}
 }
@@ -74,6 +75,24 @@ message GetDataReply{
   repeated string key = 2;
   repeated string value = 3;
   repeated uint64 expire_time = 4;
+  string msg = 256 ;
+}
+message PushDataRequest{
+  //该节点分配的位置
+  string ip = 1;
+  string port = 2;
+  uint64 pos = 3;
+  //data part
+  repeated string key = 4;
+  repeated string value = 5;
+  repeated uint64 expire_time = 6;
+  //时间点
+  uint64 last_snapshot = 7;
+}
+
+message PushDataReply{
+  //用来承载数据，包含 key/value，expire time
+  int32 status = 1;
   string msg = 256 ;
 }
 
