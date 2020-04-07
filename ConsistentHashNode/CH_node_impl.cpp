@@ -304,8 +304,17 @@ Status CH_node_impl::GetData(::grpc::ServerContext* context, const ::Bicache::Ge
       sleep(1);
       SystemStatus.store(0);
     }else{
-      //周期性的更新数据
-
+      //获取全部数据
+      auto& inner_map = kv_store_p_->split_inner_cache();
+      //获取写锁，来避免其他的数据进入
+      std::shared_lock<std::shared_mutex> w_lock(kv_store_p_->get_inner_cache_lock());
+      for(auto& val : inner_map){
+        reply->add_key(val.first);
+        reply->add_value(val.second.second);
+        reply->add_expire_time(val.second.first);
+      }
+      w_lock.unlock();
+      cur_snapshot_for_backup_ =1;
     }
     info("{} GetData from {}: send {} keys ", cur_pos_, req->pos(), reply->key_size());
     return {grpc::StatusCode::OK, ""};
@@ -732,10 +741,39 @@ void CH_node_impl::HB_to_proxy(){
             next_pos_ = cur_pos_;
             next_node_ip_port_ = cur_host_ip_ + ":" + cur_host_port_;
             //update finger_table 
-
             for(auto i=0;i<finger_table_.size();i++){
               finger_table_[i].set_successor(cur_pos_);
             }
+          }else{
+            //merge backup 数据
+            //TODO::在心跳线程中 merge 数据可能会导致，心跳包超时，我这里超时就设置的大一些。
+            auto& inner_cache = kv_store_p_->get_mutable_inner_cache();
+            auto& backup_data = kv_store_p_->get_backup();
+            std::shared_lock<std::shared_mutex> w_lock(kv_store_p_->get_inner_cache_lock());
+            for(auto& val:backup_data.backup_cache){
+              //理论上 backup_data 和 inner_cache 的数据不会相交，所以没有检测
+              inner_cache.insert(std::make_pair(std::string(val.first), val.second));
+            }
+            backup_data.backup_cache.clear();
+            info("clearing all the keys of backup");
+            w_lock.unlock();
+            //Get add data of pre
+            Bicache::GetDataRequest getDataReq;
+            getDataReq.set_ip(cur_host_ip_);
+            getDataReq.set_port(cur_host_port_);
+            getDataReq.set_pos(cur_pos_);
+            getDataReq.set_join_node(true);
+            Bicache::GetDataReply getDataReply;
+            grpc::ClientContext ctx;
+            auto status = CH_client_->GetData(&ctx, getDataReq, &getDataReply);
+            if(!status.ok()){
+              //失败了应该重试，我这里直接GG了
+              critical("Ser: Get Data failed ");
+            }
+            for(auto i=0;i<getDataReply.key_size();i++){
+              backup_data.backup_cache[getDataReply.key(i)] = std::make_pair(getDataReply.expire_time(i), getDataReply.value(i));
+            }
+            cur_snapshot_for_main_ = 1;
           }
           pre_CH_client_ = std::make_unique<Bicache::ConsistentHash::Stub>(grpc::CreateChannel(
             pre_node_ip_port_, grpc::InsecureChannelCredentials()));
