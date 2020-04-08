@@ -89,7 +89,7 @@ private:
     //上层服务的信息
     std::string kv_port_;
     //config 
-    int push_data_interval_ = 50000000;
+    int push_data_interval_ = 5000000;
     int stablize_interval_ = 1000000;
     bool exit_flag_ = false;
     KV_store_impl* kv_store_p_;

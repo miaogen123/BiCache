@@ -188,7 +188,8 @@ public:
       return -1;
     }
     // only for debug
-    info("set key {}: value {} from pos {}", key, value, key_successor);
+    auto key_hash = MurmurHash64B(key.c_str(), key.size())%virtual_node_num_;
+    info("set key {}: value {} keypos {} from pos {}", key, value, key_hash, key_successor);
     return 0;
   }
 private:

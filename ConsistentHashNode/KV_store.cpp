@@ -12,7 +12,7 @@ extern std::atomic<int> SystemStatus;
 KV_store_impl::KV_store_impl(Conf& conf):inner_conf_(conf){
   auto bucket_size = conf.get("bucket_size", "10000");
   inner_cache_.reserve(atoi(bucket_size.c_str()));
-  inner_cache_["hello"]=std::make_pair<uint64_t, std::string>(get_miliseconds(), "world");
+  //inner_cache_["hello"]=std::make_pair<uint64_t, std::string>(get_miliseconds(), "world");
   increment_data_keys_.reset(new std::vector<std::string>());
   backup_increment_data_keys_.reset(new std::vector<std::string>());
 }
@@ -137,7 +137,7 @@ int KV_store_impl::is_valid(uint64_t& timestamp, int& req_id, uint64_t& key_pos,
   }
   if(ret<0){
     rsp->set_status_code(ret);
-    return {grpc::StatusCode::OK, ""};
+    return {grpc::StatusCode::ABORTED, ""};
   }
   {
     std::unique_lock<std::shared_mutex> w_lock_(rw_lock_for_cache_);

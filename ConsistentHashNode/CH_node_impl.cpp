@@ -169,8 +169,8 @@ void CH_node_impl::push_increment_data(){
     std::unique_ptr<std::vector<std::string>> new_increment_data(new std::vector<std::string>());
     //swap(increment_data, new_increment_data);
     increment_data.swap(new_increment_data);
-    debug("Ser: backup data {} {}", kv_store_p_->get_backup_increment_data()->size(), new_increment_data->size());
-    debug("Ser: data {} {}", increment_data->size(), new_increment_data->size());
+//    debug("Ser: backup data {} {}", kv_store_p_->get_backup_increment_data()->size(), new_increment_data->size());
+//    debug("Ser: data {} {}", increment_data->size(), new_increment_data->size());
 
     auto& inner_cache = kv_store_p_->get_mutable_inner_cache();
     Bicache::PushDataRequest  pushDataReq;
@@ -203,7 +203,7 @@ void CH_node_impl::push_increment_data(){
     if(status.ok()){
       cur_snapshot_for_main_++;
       backup_increment_data->clear();
-      info("push data to {} ip {} success, snapshot {}, {} {}", next_pos_, next_node_ip_port_, cur_snapshot_for_main_, increment_data->size(), new_increment_data->size());
+      info("push {} keys to {} ip {} success, snapshot {}, now increment size {} ", new_increment_data->size(), next_pos_, next_node_ip_port_, cur_snapshot_for_main_, increment_data->size());
     }else{
       //rollback when failing to push,
       for(auto& key:*new_increment_data){
@@ -314,7 +314,8 @@ Status CH_node_impl::GetData(::grpc::ServerContext* context, const ::Bicache::Ge
         reply->add_expire_time(val.second.first);
       }
       w_lock.unlock();
-      cur_snapshot_for_backup_ =1;
+//    这个分支的代码一般是下游节点请求上游的全部数据用的，所以不同reset for_backup变量
+//    cur_snapshot_for_backup_ =1;
     }
     info("{} GetData from {}: send {} keys ", cur_pos_, req->pos(), reply->key_size());
     return {grpc::StatusCode::OK, ""};
@@ -762,7 +763,7 @@ void CH_node_impl::HB_to_proxy(){
             getDataReq.set_ip(cur_host_ip_);
             getDataReq.set_port(cur_host_port_);
             getDataReq.set_pos(cur_pos_);
-            getDataReq.set_join_node(true);
+            getDataReq.set_join_node(false);
             Bicache::GetDataReply getDataReply;
             grpc::ClientContext ctx;
             auto status = CH_client_->GetData(&ctx, getDataReq, &getDataReply);
@@ -773,7 +774,8 @@ void CH_node_impl::HB_to_proxy(){
             for(auto i=0;i<getDataReply.key_size();i++){
               backup_data.backup_cache[getDataReply.key(i)] = std::make_pair(getDataReply.expire_time(i), getDataReply.value(i));
             }
-            cur_snapshot_for_main_ = 1;
+            cur_snapshot_for_backup_ = 1;
+            info("Ser: get {} keys from prenode because of LEAVING", getDataReply.key_size());
           }
           pre_CH_client_ = std::make_unique<Bicache::ConsistentHash::Stub>(grpc::CreateChannel(
             pre_node_ip_port_, grpc::InsecureChannelCredentials()));
