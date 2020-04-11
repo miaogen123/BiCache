@@ -3,6 +3,7 @@
 #include <unordered_map>
 #include <memory>
 #include <string>
+#include <random>
 #include <thread>
 #include <shared_mutex>
 #include <unistd.h>
@@ -104,7 +105,8 @@ public:
   }
 
   uint32_t get_key_successor(const std::string& key, uint32_t& key_pos, bool& overloaded, bool find_backup=false){
-    key_pos = MurmurHash64B(key.c_str(), key.length()) % virtual_node_num_;
+    auto hash_value = MurmurHash64B(key.c_str(), key.length());
+    key_pos = hash_value % virtual_node_num_;
     std::shared_lock<std::shared_mutex> w_lock(rw_lock_for_pos2host_);
     auto ite_lower = pos2host_.lower_bound(key_pos);
     uint32_t successor = 0;
@@ -116,6 +118,12 @@ public:
 
     if(find_backup || pos2host_[successor].overloaded ){
       //debug("test {}  {}", find_backup, pos2host_[successor].overloaded);
+      static std::default_random_engine generator;
+      static std::uniform_int_distribution<int> dis(0,1); 
+      if(dis(generator)==0){
+        overloaded = false;
+        return successor;
+      }
       auto origin_succ = successor;
       auto ite_backup = pos2host_.lower_bound(successor+1);
       if(ite_backup == pos2host_.end()){
