@@ -43,12 +43,29 @@ uint64_t get_miliseconds(){
     return duration_cast<milliseconds>(d).count();
 }
 
+struct NodeStatus{
+  bool overloaded = false;
+  std::string inner_host;
+  NodeStatus(){}
+  NodeStatus(const std::string& host){
+    inner_host = host;
+  }
+  NodeStatus(const NodeStatus& nodeStatus){
+    inner_host = nodeStatus.inner_host;
+    overloaded = nodeStatus.overloaded;
+  }
+};
+
 class KV_client{
 public: 
   using PosClientType = std::unordered_map<uint32_t, std::shared_ptr<Bicache::KV_service::Stub>>;
   KV_client(Conf conf){
     auto proxy_ip = conf.get("proxy_ip");
     auto proxy_port = conf.get("proxy_port");
+    auto read_backup_flag = conf.get("read_backup", "");
+    if(read_backup_flag.size()!=0){
+      read_backup_  = true;
+    }
     proxy_ip_port_ = proxy_ip+":"+proxy_port;
     proxy_client_ = std::make_shared<Bicache::ProxyServer::Stub>(grpc::CreateChannel(
         proxy_ip_port_, grpc::InsecureChannelCredentials() ));
@@ -72,7 +89,7 @@ public:
         for(auto i=0;i<rsp.pos_list_size();i++){
           auto pos = rsp.pos_list(i);
           auto host = rsp.ip_port_list(i);
-          pos2host_[pos]=host;
+          pos2host_[pos] = NodeStatus(host);
           info("pos {}, host {}", pos, host);
           auto proxy_client = std::make_shared<Bicache::KV_service::Stub>(grpc::CreateChannel(
               host, grpc::InsecureChannelCredentials()));
@@ -86,7 +103,7 @@ public:
     pos2kvclient_ptr_.swap(pos2kvclient_ptr_tmp);
   }
 
-  uint32_t get_key_successor(const std::string& key, uint32_t& key_pos){
+  uint32_t get_key_successor(const std::string& key, uint32_t& key_pos, bool& overloaded, bool find_backup=false){
     key_pos = MurmurHash64B(key.c_str(), key.length()) % virtual_node_num_;
     std::shared_lock<std::shared_mutex> w_lock(rw_lock_for_pos2host_);
     auto ite_lower = pos2host_.lower_bound(key_pos);
@@ -96,6 +113,20 @@ public:
     }else{
       successor = ite_lower->first;
     }
+
+    if(find_backup || pos2host_[successor].overloaded ){
+      //debug("test {}  {}", find_backup, pos2host_[successor].overloaded);
+      auto origin_succ = successor;
+      auto ite_backup = pos2host_.lower_bound(successor+1);
+      if(ite_backup == pos2host_.end()){
+        successor = pos2host_.cbegin()->first;
+      }else{
+        successor = ite_backup->first;
+      }
+      //info("find backup {} origin is {}", successor, origin_succ);
+      overloaded = true;
+    }
+    //debug("success returned {}", successor);
     return successor;
   }
 
@@ -105,7 +136,8 @@ public:
       return "";
     }
     uint32_t key_pos=0;
-    auto key_successor = get_key_successor(key, key_pos);
+    bool node_overloaded = false;
+    auto key_successor = get_key_successor(key, key_pos, node_overloaded);
     auto ite_client = (*pos2kvclient_ptr_).find(key_successor);
     if(ite_client == (*pos2kvclient_ptr_).end()){
       warn("no client of pos {}", key_successor);
@@ -118,6 +150,7 @@ public:
     Bicache::GetReply rsp;
     ClientContext ctx;
     req.set_key(key);
+    req.set_read_replica(node_overloaded);
     req.set_pos_of_key(key_successor);
     req.set_timestamp(get_miliseconds());
     req.set_req_id(getRandomInt());
@@ -145,17 +178,30 @@ public:
       //后面再补这部分的代码
       return "";
     }
+    //primary overloaded
+    if(rsp.node_overloaded()&&read_backup_){
+      auto ite = pos2host_.find(key_successor);
+      if(ite == pos2host_.end()){
+        critical("find host {} in pos2host failed, bad logic", key_successor);
+      }else{
+        pos2host_[key_successor].overloaded=true;
+      }
+      debug("found node {} overloaded", key_successor);
+    }
     // only for debug
     return rsp.value();
   }
 
   int Set(const std::string& key, const std::string& value) {
+    //pos2host_ 理论上是应该用shared_mutex来保护的
     if(pos2host_.empty()){
       warn("pos list is empty, which is impossible for me to find any keys");
       return -1;
     }
     uint32_t key_pos=0;
-    auto key_successor = get_key_successor(key, key_pos);
+    //TODO::这里其实多算了一次
+    bool node_overloaded = false;
+    auto key_successor = get_key_successor(key, key_pos, node_overloaded);
     auto ite_client = (*pos2kvclient_ptr_).find(key_successor);
     if(ite_client == (*pos2kvclient_ptr_).end()){
       warn("no client of pos {}", key_successor);
@@ -188,15 +234,16 @@ public:
       return -1;
     }
     // only for debug
-    auto key_hash = MurmurHash64B(key.c_str(), key.size())%virtual_node_num_;
-    info("set key {}: value {} keypos {} from pos {}", key, value, key_hash, key_successor);
+    //auto key_hash = MurmurHash64B(key.c_str(), key.size())%virtual_node_num_;
+    info("set key {}: value {} keypos {} from pos {}", key, value, key_pos, key_successor);
     return 0;
   }
 private:
   uint32_t virtual_node_num_;
+  bool read_backup_ = false;
   std::string proxy_ip_port_;
   std::shared_mutex rw_lock_for_pos2host_;
-  std::map<uint32_t, std::string> pos2host_;
+  std::map<uint32_t, NodeStatus> pos2host_;
   std::shared_ptr<Bicache::ProxyServer::Stub> proxy_client_;
   //这里到不同的节点的client，用指针存储效果会更好，unique_ptr存储的话，就不要读写锁了
   std::unique_ptr<PosClientType> pos2kvclient_ptr_;
@@ -248,12 +295,19 @@ int main(int argc, char** argv) {
     }else if(input_value == 2  ){
       std::cin>>key;
       kvc.Get(key);
-    }else if(input_value = 3){
+    }else if(input_value == 3){
       std::cin >> key ;
       std::cin >> value ;
       kvc.Set(key, value);
+    }else if(input_value == 4){
+      //test get
+      key = keys[i];
+      kvc.Get(key);
     }
-    std::cin>>input_value;
+    if(input_value !=4){
+      std::cin>>input_value;
+      usleep(1000);
+    }
   }while(input_value!=9);
   return 0;
 }

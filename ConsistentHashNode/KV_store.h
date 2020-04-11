@@ -37,6 +37,13 @@ struct BackupData{
     cache_type backup_cache;
 };
 
+struct PosStatus{
+    int pos ;
+    bool overloaded;
+    uint64_t cur_count; 
+    uint64_t pre_count; 
+};
+
 class KV_store_impl : public Bicache::KV_service::Service {
 public:
     //to communicate with proxyServer 
@@ -97,6 +104,13 @@ private:
     std::priority_queue<timed_key, std::vector<timed_key>, timed_key_order> expire_queue_;
 
     //后台更新清理线程:两个任务，清理 req_ids_,清理 inner_cache_
+
+    //开启读热点、设置阈值、在 get 的时候进行计数
+    //允许客户端进行自己的处理
+    int32_t read_limit_ = 0;   
+    std::vector<PosStatus> posStatus_;
+
+
     bool exit_clean_flag_ = false;
     uint clean_interval_= 200000;
     std::shared_ptr<std::thread> backend_update_thr_;

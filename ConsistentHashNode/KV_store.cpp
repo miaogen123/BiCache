@@ -12,6 +12,10 @@ extern std::atomic<int> SystemStatus;
 KV_store_impl::KV_store_impl(Conf& conf):inner_conf_(conf){
   auto bucket_size = conf.get("bucket_size", "10000");
   inner_cache_.reserve(atoi(bucket_size.c_str()));
+  //每秒
+  auto read_limitation = conf.get("read_limitation", "0");
+  read_limit_ = atoi(read_limitation.c_str());
+  info("enable read limitation, size {}", read_limit_);
   //inner_cache_["hello"]=std::make_pair<uint64_t, std::string>(get_miliseconds(), "world");
   increment_data_keys_.reset(new std::vector<std::string>());
   backup_increment_data_keys_.reset(new std::vector<std::string>());
@@ -85,6 +89,25 @@ int KV_store_impl::is_valid(uint64_t& timestamp, int& req_id, uint64_t& key_pos,
   int req_id = req->req_id();
   rsp->set_is_found(false);
 
+  //read replica 没有加锁可能会有问题，这里留个心
+  //不做过多的验证，有数据就行
+  if(req->read_replica()){
+    std::shared_lock<std::shared_mutex> r_lock(backup_.lock);
+    auto backup_cache = backup_.backup_cache;
+    auto ite = backup_cache.find(key);
+    if(ite==backup_cache.end()){
+      rsp->set_value("");
+    }else if(ite->second.first < get_miliseconds()){
+      //超时就取不到
+      rsp->set_status_code(-4);
+      //debug("KV: read replica: get key {} failed because of expire", key);
+    }else{
+      rsp->set_is_found(true);
+      rsp->set_value(ite->second.second);
+    }
+    //info("KV: read replica req key {}, founded: {}", key, rsp->is_found()?"true":"false");
+    return {grpc::StatusCode::OK, ""};
+  }
   auto ret= is_valid(timestamp, req_id, key_pos, msg);
   // ret == -3:key is not in range
   if(ret == -3){
@@ -98,6 +121,11 @@ int KV_store_impl::is_valid(uint64_t& timestamp, int& req_id, uint64_t& key_pos,
     return {grpc::StatusCode::OK, ""};
   }
   {
+    //开启了read_limit_
+    if(read_limit_!=0){
+      posStatus_[key_pos].cur_count++;
+      rsp->set_node_overloaded(posStatus_[key_pos].overloaded);
+    }
     std::shared_lock<std::shared_mutex> r_lock_for_cache(rw_lock_for_cache_);
     auto ite = inner_cache_.find(key);
     if(ite==inner_cache_.end()){
@@ -186,6 +214,7 @@ void KV_store_impl::run_CH_node(){
   spdlog::info("KV:CH node listening on {}", server_address);
   ch_node_->run();
   virtual_node_num_ = ch_node_->get_virtual_node_num_();
+  posStatus_.resize(virtual_node_num_);
   server->Wait();
 }
 
@@ -197,6 +226,7 @@ void KV_store_impl::backend_update(){
   do{
     count++;
     usleep(clean_interval_);
+    //清理过期的req，防重放
     {
       std::unique_lock<std::shared_mutex> w_lock_for_ids(rw_lock_for_ids_);
       auto cur_miliseconds = get_miliseconds();
@@ -212,6 +242,7 @@ void KV_store_impl::backend_update(){
       }
     }
     uint64_t curr_ts = get_miliseconds();
+    //清理过期的keys
     {
       std::unique_lock<std::shared_mutex> lock(rw_lock_for_cache_);
       while (!expire_queue_.empty()) {
@@ -233,6 +264,7 @@ void KV_store_impl::backend_update(){
     //clean the keys not in my range() and  not in prenode 
     //note: case(keys not in my range usually)happens when node joins, because node joins not so frequently, 
     //this operation run a few
+    //清理已经分出去的keys(上个节点负责的先不清)
     if(count == 20 && ch_node_->get_pp_node()!=-1){
       std::vector<cache_type::iterator> ite_to_be_deleted;
       std::shared_lock<std::shared_mutex> r_lock(rw_lock_for_cache_);
@@ -262,7 +294,28 @@ void KV_store_impl::backend_update(){
 //      inner_cache_.erase(it);
 //      expire_queue_.pop();
 //  }
-
+      //这里让他每秒走一次就好了，因为量不大，就直接遍历就好了
+      //用来计算吞吐
+      if(count==10){
+        int time_elasp = count * clean_interval_ /1000000 +1;
+        uint64_t cur_count =0;
+        uint64_t pre_count =0;
+        for(int i=0;i<virtual_node_num_;i++){
+          cur_count = posStatus_[i].cur_count;
+          pre_count = posStatus_[i].pre_count;
+          if(cur_count!=0){
+            auto throughput = ((cur_count - pre_count)/time_elasp );
+            if(throughput > read_limit_){
+              info("KV:pos{}, get throughput {} in {}s, overloaded", i, throughput, time_elasp);
+              posStatus_[i].overloaded= true;
+            }else{
+              posStatus_[i].overloaded= false;
+            }
+            posStatus_[i].pre_count=cur_count;
+          }
+        }
+      }
+      //interval=200ms时，6s清理一次
       if(count==30){
         info("KV:clean log: clean {} expire req_ids_, keysize {}", expire_clean_count++, inner_cache_.size());
         count=0;

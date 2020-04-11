@@ -38,13 +38,16 @@ message GetRequest{
   uint64 pos_of_key = 3;
   uint64 timestamp = 4;
   //times to extension existence
+  bool read_replica = 5;
   uint64 update_times= 6;
 }
+
 message GetReply{
   bool is_found = 1;  
   string value = 2;
   uint64 close_pos = 3;
   uint64 timestamp = 4;
+  bool node_overloaded = 5;
   uint32 status_code = 255;
 }
 
