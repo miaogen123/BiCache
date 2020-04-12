@@ -22,6 +22,7 @@ service ProxyServer{
   rpc Register(RegisterRequest) returns (RegisterReply) {}
   rpc HeartBeat(ProxyHeartBeatRequest) returns (ProxyHeartBeatReply) {}
   rpc GetConfig(GetConfigRequest) returns (GetConfigReply) {}
+  rpc Transaction(TransactionRequest) returns (TransactionReply) {}
   //rpc GetNodeStatus(GetNodeStatusRequest) returns (GetConfigReply) {}
 }
 
@@ -75,4 +76,15 @@ message GetConfigReply{
   repeated uint32 pos_list = 1;
   repeated string ip_port_list = 2;
   uint32 virtual_node_num= 3;
+}
+
+message TransactionRequest{
+  uint64 req_id = 1;
+  repeated string keys = 2;
+  repeated string values = 3;
+}
+
+message TransactionReply{
+  //0 success, 1 failed
+  uint32 status = 1;
 }

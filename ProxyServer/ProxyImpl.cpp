@@ -141,6 +141,74 @@ Status ProxyServerImpl::GetConfig(ServerContext* context, const GetConfigRequest
     return grpc::Status{grpc::StatusCode::OK, ""};
 }
 
+Status ProxyServerImpl::Transaction(ServerContext* context, const TransactionRequest* req, TransactionReply* reply){
+    //希望多个值，要么进行修改，要么就全部回滚
+    //不给支持设置超时
+    debug("get transaction...");
+    std::vector<int> pos_list;
+    std::vector<std::string> keys;
+    std::vector<std::string> values;
+    for(auto i=0;i<req->keys_size();i++){
+        keys.push_back(req->keys(i));
+        values.push_back(req->values(i));
+        pos_list.push_back(MurmurHash64B(keys.back().c_str(), keys.back().size()));
+    }
+    //把相关key都上锁
+    {
+        //对需要的key等待1ms，超过5ms没有拿到所有锁就离开
+        int count = 5;
+        std::unique_lock<std::mutex> w_lock(lock_for_transaction_keys);
+        bool lock_flag = true;
+        w_lock.unlock();
+        for(auto i =0 ;i<keys.size();i++){
+            auto& key = keys[i];
+            //debug("get {} key {} ", i, key);
+            do{
+                if(lock_flag){
+                    w_lock.lock();
+                    lock_flag=false;
+                }
+                auto ite= keys_occupied.find(key);
+                if(ite==keys_occupied.end()){
+                    keys_occupied.insert(key);
+                    //debug("insert key {} ", key);
+                    break;
+                }else{
+                    //释放锁,sleep,重试
+                    w_lock.unlock();
+                    lock_flag = true;
+                    count--;
+                    //debug("insert failed key {} count {}", key, count);
+                    if(count == 0 ){
+                        debug("req id {} get keys lock failed", req->req_id());
+                        return {grpc::StatusCode::ABORTED, "get keys lock timeout"};
+                    }
+                }
+                usleep(sleep_interval_in_locking_keys);
+            }while(true);
+        }
+    }
+
+    //拿到key锁，开始协调事务，node要lock对应的资源，调用各个node的prepare方法 
+    //prepare
+
+    //commit 
+
+    //rollback
+
+    
+    //结束，释放对于key的锁
+    {
+        std::unique_lock<std::mutex> w_lock(lock_for_transaction_keys);
+        for(auto& key:keys){
+            //auto ite= keys_occupied.find(key);
+            keys_occupied.erase(key);
+        }
+        debug("release keys in transaction");
+    }
+    return {grpc::StatusCode::OK, "get keys lock timeout"};
+}
+
 void ProxyServerImpl::backend_update(){
     uint64_t seconds;
     while(update_flag_){

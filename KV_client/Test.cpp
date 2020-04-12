@@ -3,6 +3,7 @@
 #include <unordered_map>
 #include <memory>
 #include <string>
+#include <limits>
 #include <random>
 #include <thread>
 #include <shared_mutex>
@@ -246,6 +247,27 @@ public:
     info("set key {}: value {} keypos {} from pos {}", key, value, key_pos, key_successor);
     return 0;
   }
+  int Transaction(const std::vector<std::string>& keys, const std::vector<std::string>& values){
+    //提交事务
+    if(keys.size()!=values.size()){
+      critical("transaction input with diff length:{} {}",keys.size(), values.size());
+      return -1;
+    }
+    Bicache::TransactionRequest req;
+    Bicache::TransactionReply rsp;
+    req.set_req_id(getRandomInt());
+    for(auto i =0 ;i<keys.size();i++){
+      req.add_keys(keys[i]);
+      req.add_values(values[i]);
+    }
+    grpc::ClientContext ctx;
+    auto status = proxy_client_->Transaction(&ctx, req, &rsp);
+    if(!status.ok()){
+      warn("reqid {} transaction failed with msg:{}", req.req_id(), status.error_message());
+      return -1;
+    }
+    return 0;
+  }
 private:
   uint32_t virtual_node_num_;
   bool read_backup_ = false;
@@ -311,6 +333,21 @@ int main(int argc, char** argv) {
       //test get
       key = keys[i];
       kvc.Get(key);
+    }else if(input_value == 5){
+      //transaction
+      std::vector<std::string> keys;
+      std::vector<std::string> values;
+      std::string keys_one_line;
+      std::string values_one_line;
+
+      //这玩意有点坑啊
+      std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n' );
+      std::getline(std::cin,keys_one_line, '\n');
+      std::getline(std::cin,values_one_line, '\n');
+
+      SplitString(keys_one_line, keys, ' ');
+      SplitString(values_one_line, values, ' ');
+      kvc.Transaction(keys, values);
     }
     if(input_value !=4){
       std::cin>>input_value;
