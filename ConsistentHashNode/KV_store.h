@@ -68,6 +68,7 @@ public:
     std::unique_ptr<std::vector<std::string>>& get_increment_data();
     std::unique_ptr<std::vector<std::string>>& get_backup_increment_data();
 
+    void release_resource_in_transaction(int req_id);
     static void run();
     void backend_update();
     ~KV_store_impl();
@@ -79,8 +80,11 @@ private:
     Conf inner_conf_;
 
 
+    //锁就锁吧，毕竟不搞锁，连功能都搞不对啊
+    std::shared_mutex rw_lock_for_trans_;
+    std::set<std::string> keys_in_trans_;
     //事务管理器
-    TransactionManager transactions;
+    TransactionManager transactions_;
     // 后台线程在清理这个的时候，需要读写锁，不然可能会出core
     // TODO::这里有一个优化的地方，就是批量删除，遇到需要删除的值，可以把 ite 放进 vector 最后再删除。
     // 当然删除的时候是要做标记的，免得有请求过来的时候，写了相同的key，清理线程无感直接把这个给删除了，这样就不一致了

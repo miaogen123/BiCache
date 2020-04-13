@@ -284,11 +284,11 @@ Status ProxyServerImpl::Transaction(ServerContext* context, const TransactionReq
                 if(status.error_code() == grpc::UNIMPLEMENTED ){
                     extra_msg="unimplemented";
                 }
-                debug("reqid {} step {} errormsg {} extra {}", req->req_id(), step_count, status.error_message(), extra_msg);
+                debug("reqid {} to pos {} step {} errormsg {}", req->req_id(), pos, step_count, status.error_message());
                 break;
             }
         }
-        debug("req_id {} transacton prepare finished", req->req_id());
+        debug("req_id {} transacton prepare finished with {} req", req->req_id(), step_reqs.size());
         step_count++;
         if(!success_flag){
             //rollback
@@ -327,7 +327,7 @@ Status ProxyServerImpl::Transaction(ServerContext* context, const TransactionReq
                 auto status = client->TransactionCommit(&ctx, step_req, &step_rsp);
                 if(!status.ok()){
                     success_flag= false;
-                    debug("reqid {} step {} errormsg {}", req->req_id(), step_count, status.error_message());
+                    debug("reqid {} to pos {} step {} errormsg {}", req->req_id(), pos, step_count, status.error_message());
                     break;
                 }
                 count++;
@@ -335,7 +335,7 @@ Status ProxyServerImpl::Transaction(ServerContext* context, const TransactionReq
             if(count !=clients.size()){
                 critical("NOT ALL TRANSACTIONS COMMITTED, PLEASE CHECK THIS TRANSACTION MANUALLY");
             }
-            debug("req_id {} transacton committed", req->req_id());
+            debug("req_id {} transacton committed, {} req send", req->req_id(), clients.size());
         }
     }while(false);
     

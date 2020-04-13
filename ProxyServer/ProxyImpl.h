@@ -44,6 +44,9 @@ private:
     //需要有数据结构，方便的记录当前的哈希环的拓扑：要考虑动态的删减的情况，
     //需要有 host 和位置，以及位置和 host 的映射
 
+    //这个地方还是要加锁的啊、加紧搞吧，搞完然后要写摘要，写提纲
+    //读写锁就读写锁吧
+ 
     std::mutex lock_for_client_;
     PosClientType pos2client_;
     

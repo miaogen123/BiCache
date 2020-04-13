@@ -167,12 +167,22 @@ int KV_store_impl::is_valid(uint64_t& timestamp, int& req_id, uint64_t& key_pos,
     rsp->set_status_code(ret);
     return {grpc::StatusCode::ABORTED, ""};
   }
-  {
+
+  do{
+    //判断是否是事务
+    std::shared_lock<std::shared_mutex> w_lock_for_trans(rw_lock_for_trans_);
+    if(keys_in_trans_.find(key)!=keys_in_trans_.end()){
+      debug("key {} op aborted because the key is in transactions");
+      return {grpc::StatusCode::ABORTED, "key in in transaction"};
+    }
+    w_lock_for_trans.unlock();
+
     std::unique_lock<std::shared_mutex> w_lock_(rw_lock_for_cache_);
     auto ite = inner_cache_.find(key);
     rsp->set_is_set(true);
     std::string value = req->value();
     uint64_t timestamp = get_miliseconds();
+
     if(ite==inner_cache_.end()){
       ite = inner_cache_.insert({key, std::make_pair<uint64_t, std::string>(std::move(timestamp), std::move(value))}).first;
     }else{
@@ -188,24 +198,73 @@ int KV_store_impl::is_valid(uint64_t& timestamp, int& req_id, uint64_t& key_pos,
       ite->second.first = std::numeric_limits<uint64_t>::max();
     }
     increment_data_keys_->push_back(key);
-  }
+  }while(false);
   //流量小的时候可以，大的时候就不能打这种log了
   //info("KV:Get from ")
   return {grpc::StatusCode::OK, ""};
 }
 
+//一个是删除占用的资源，一个是删除这个事务
+void KV_store_impl::release_resource_in_transaction(int req_id){
+  auto ite = transactions_.transactions.find(req_id);
+  if(ite==transactions_.transactions.end()){
+    debug("req_id {} released already", req_id);
+    return;
+  }
+
+  auto& single_trans = ite->second;
+  std::unique_lock<std::shared_mutex> w_lock(rw_lock_for_trans_);
+  for(auto& key:single_trans.keys){
+    debug("KV: releasing transaction resource, erase key {}",key);
+    keys_in_trans_.erase(key);
+  }
+  w_lock.unlock();
+
+  //delete transaction
+  std::unique_lock<std::shared_mutex> w_lock_to_erase(transactions_.w_lock);
+  transactions_.transactions.erase(req_id);
+}
+
 //prepare 锁定资源
 ::grpc::Status KV_store_impl::TransactionPrepare(::grpc::ServerContext* context, const ::Bicache::TransactionStepRequest* req, ::Bicache::TransactionStepReply* rsp){
-  sleep(1);
   debug("KV:transaction:prepare req_id:{} ", req->req_id());
+  //构建 transaction
+  SingleTransaction single_trans;
+  for(auto i=0;i<req->keys_size();i++){
+    auto pos = MurmurHash64B(req->keys(i).c_str(), req->keys(i).size())%virtual_node_num_;
+    if(ch_node_->in_range(pos)){
+      single_trans.keys.push_back(req->keys(i));
+    }else{
+      debug("KV:trans aborted becauseof key {} not in my range");
+      release_resource_in_transaction(req->req_id());
+      return {grpc::StatusCode::OK, ""};
+    }
+  }
+
+  //占据资源
+  std::unique_lock<std::shared_mutex> w_lock(rw_lock_for_trans_);
+  for(auto& key:single_trans.keys){
+    keys_in_trans_.insert(key);
+    debug("KV:lock key in map {}", key);
+  }
+  w_lock.unlock();
+
+  //事务入库
+  std::unique_lock<std::shared_mutex> w_lock_to_insert_trans(transactions_.w_lock);
+  transactions_.transactions.insert({req->req_id(), std::move(single_trans)}); 
   return {grpc::StatusCode::OK, ""};
 }
+
 ::grpc::Status KV_store_impl::TransactionCommit(::grpc::ServerContext* context, const ::Bicache::TransactionStepRequest* req, ::Bicache::TransactionStepReply* rsp){
+  usleep(2000000);
+  //不再检测正确性，直接搞set
   debug("KV:transaction:commit req_id:{} ", req->req_id());
   return {grpc::StatusCode::OK, ""};
 }
+
 ::grpc::Status KV_store_impl::TransactionRollback(::grpc::ServerContext* context, const ::Bicache::TransactionStepRequest* req, ::Bicache::TransactionStepReply* rsp){
   debug("KV:transaction:rollback req_id:{} ", req->req_id());
+  release_resource_in_transaction(req->req_id());
   return {grpc::StatusCode::OK, ""};
 }
 

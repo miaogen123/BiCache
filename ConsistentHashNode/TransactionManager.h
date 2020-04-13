@@ -25,6 +25,6 @@ public:
 
 std::shared_mutex w_lock;
 //为了方便可见，这里使用了public,更加合适的是采用private
-std::map<int, SingleTransaction> transactoins;
+std::map<int, SingleTransaction> transactions;
 private:
 };
