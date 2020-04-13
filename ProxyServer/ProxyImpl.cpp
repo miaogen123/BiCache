@@ -10,7 +10,6 @@ namespace Bicache{
 using grpc::StatusCode;
 
 //静态成员初始化
-
 uint64_t get_miliseconds(){
     using namespace std::chrono;
     steady_clock::duration d;
@@ -35,6 +34,20 @@ ProxyServerImpl::ProxyServerImpl(std::unordered_map<std::string, std::string>& c
     info("proxy server working");
     //std::thread* tmp = new std::thread(&ProxyServerImpl::backend_update, this);
     update_thr_ = std::make_shared<std::thread>(&ProxyServerImpl::backend_update, this);
+}
+
+uint32_t ProxyServerImpl::get_key_successor(const std::string& key, uint32_t& key_pos){
+  auto hash_value = MurmurHash64B(key.c_str(), key.length());
+  key_pos = hash_value % virtual_node_num_;
+  std::unique_lock<std::mutex> w_lock(add_node_lock_);
+  auto ite_lower = pos2host_.lower_bound(key_pos);
+  uint32_t successor = 0;
+  if(ite_lower == pos2host_.end()){
+    successor = pos2host_.cbegin()->first;
+  }else{
+    successor = ite_lower->first;
+  }
+  return successor;
 }
 
 Status ProxyServerImpl::Register(ServerContext* context, const RegisterRequest* req, RegisterReply* reply){
@@ -107,8 +120,15 @@ Status ProxyServerImpl::Register(ServerContext* context, const RegisterRequest* 
         }else{
             ite_pos->second = seconds;
         }
-        debug("node {} register at {}", pos, seconds);
         pos_HB_lock_.unlock();
+        {
+            //超时也不删除，因为他终究是会被删掉的
+            std::unique_lock<std::mutex> w_lock(lock_for_client_);
+            auto CH_client = std::make_shared<Bicache::KV_service::Stub>(grpc::CreateChannel(
+               ip+":"+req->kv_port(), grpc::InsecureChannelCredentials()));
+            pos2client_.insert({pos, CH_client});
+            debug("node {} register at {} with {} create client", pos, seconds, ip_port_origin);
+        }
     }
     return Status::OK;
 } 
@@ -151,16 +171,22 @@ Status ProxyServerImpl::Transaction(ServerContext* context, const TransactionReq
     for(auto i=0;i<req->keys_size();i++){
         keys.push_back(req->keys(i));
         values.push_back(req->values(i));
-        pos_list.push_back(MurmurHash64B(keys.back().c_str(), keys.back().size()));
+        //这里得找到对应的pos，让客户端来做也行
+        uint32_t key_pos = 0;
+        auto pos = get_key_successor(keys.back().c_str(), key_pos);
+        pos_list.push_back(pos);
     }
     //把相关key都上锁
+    std::map<int, std::vector<int>> pos_keys;
     {
         //对需要的key等待1ms，超过5ms没有拿到所有锁就离开
         int count = 5;
-        std::unique_lock<std::mutex> w_lock(lock_for_transaction_keys);
+        std::unique_lock<std::mutex> w_lock(lock_for_transaction_keys_);
         bool lock_flag = true;
         w_lock.unlock();
-        for(auto i =0 ;i<keys.size();i++){
+        for(auto i = 0 ;i<keys.size();i++){
+            int tmp_pos = pos_list[i];
+            pos_keys[tmp_pos].push_back(i);
             auto& key = keys[i];
             //debug("get {} key {} ", i, key);
             do{
@@ -168,9 +194,9 @@ Status ProxyServerImpl::Transaction(ServerContext* context, const TransactionReq
                     w_lock.lock();
                     lock_flag=false;
                 }
-                auto ite= keys_occupied.find(key);
-                if(ite==keys_occupied.end()){
-                    keys_occupied.insert(key);
+                auto ite= keys_occupied_.find(key);
+                if(ite==keys_occupied_.end()){
+                    keys_occupied_.insert(key);
                     //debug("insert key {} ", key);
                     break;
                 }else{
@@ -184,29 +210,124 @@ Status ProxyServerImpl::Transaction(ServerContext* context, const TransactionReq
                         return {grpc::StatusCode::ABORTED, "get keys lock timeout"};
                     }
                 }
-                usleep(sleep_interval_in_locking_keys);
+                usleep(sleep_interval_in_locking_keys_);
             }while(true);
         }
     }
 
-    //拿到key锁，开始协调事务，node要lock对应的资源，调用各个node的prepare方法 
-    //prepare
+    bool success_flag = true;
+    int step_count = 0;
+    do{
+        //拿到key锁，开始协调事务，node要lock对应的资源，调用各个node的prepare方法 
+        //这里为了方便就全部串行了
+        //prepare
+        //获取client
+        //构造请求
+        std::map<int, TransactionStepRequest> step_reqs;
+        std::map<int, TransactionStepReply> step_rsps;
+        std::map<int, KV_client_ptr> clients;
+        {
+            std::unique_lock<std::mutex> w_lock(lock_for_client_);
+            for(auto& pair :pos_keys){
+                TransactionStepRequest step_req;
+                auto ite = pos2client_.find(pair.first);
+                if(ite==pos2client_.end()){
+                    //debug("transaction can't find client of {}", pair.first);
+                    return grpc::Status{grpc::StatusCode::ABORTED, "can't find client of pos " + std::to_string(pair.first)};
+                }else{
+                    if(clients.find(pair.first)==clients.end()){
+                        //debug("add client for {} ", pair.first);
+                        clients[pair.first]=ite->second;
+                    }
+                }
+                for(auto& pos:pair.second){
+                    step_req.add_keys(keys[pos]);
+                    step_req.add_values(values[pos]);
+                }
+                //TODO::step_id使用enum class 会更加合适
+                step_req.set_step_id(1);
+                step_req.set_req_id(req->req_id());
+                step_reqs.insert({pair.first, std::move(step_req)});
+                step_rsps.insert({pair.first, TransactionStepReply{}});
+            }
+        }
+        //序列化调用 prepare 接口，当然更好的方式是并行
+        for(auto& pair:clients){
+            auto& client = pair.second; 
+            int pos = pair.first;
+            //这里是确定 req 是一定存在的
+            auto& step_req = step_reqs[pos];
+            step_req.set_step_id(1);
+            auto& step_rsp = step_rsps[pos];
+            grpc::ClientContext ctx;
 
-    //commit 
-
-    //rollback
-
+            auto status = client->TransactionPrepare(&ctx, step_req, &step_rsp);
+            if(!status.ok()){
+                success_flag= false;
+                std::string extra_msg("");
+                if(status.error_code() == grpc::UNIMPLEMENTED ){
+                    extra_msg="unimplemented";
+                }
+                debug("reqid {} step {} errormsg {} extra {}", req->req_id(), step_count, status.error_message(), extra_msg);
+                break;
+            }
+        }
+        debug("req_id {} transacton prepare ", req->req_id());
+        step_count++;
+        if(!success_flag){
+            break;
+        }
+        //commit 
+        for(auto& pair:clients){
+            auto& client = pair.second; 
+            int pos = pair.first;
+            //这里是确定 req 是一定存在的
+            auto& step_req = step_reqs[pos];
+            step_req.set_step_id(2);
+            auto& step_rsp = step_rsps[pos];
+            grpc::ClientContext ctx;
+            auto status = client->TransactionCommit(&ctx, step_req, &step_rsp);
+            if(!status.ok()){
+                success_flag= false;
+                debug("reqid {} step {} errormsg {}", req->req_id(), step_count, status.error_message());
+                break;
+            }
+        }
+        step_count++;
+        if(success_flag){
+            break;
+        }
+        debug("req_id {} transacton commit", req->req_id());
+        //rollback
+        for(auto& pair:clients){
+            auto& client = pair.second; 
+            int pos = pair.first;
+            //这里是确定 req 是一定存在的
+            auto& step_req = step_reqs[pos];
+            step_req.set_step_id(3);
+            auto& step_rsp = step_rsps[pos];
+            grpc::ClientContext ctx;
+            //直接回滚
+            auto status = client->TransactionRollback(&ctx, step_req, &step_rsp);
+        }
+        step_count++;
+    }while(false);
     
     //结束，释放对于key的锁
     {
-        std::unique_lock<std::mutex> w_lock(lock_for_transaction_keys);
+        std::unique_lock<std::mutex> w_lock(lock_for_transaction_keys_);
         for(auto& key:keys){
             //auto ite= keys_occupied.find(key);
-            keys_occupied.erase(key);
+            keys_occupied_.erase(key);
         }
         debug("release keys in transaction");
     }
-    return {grpc::StatusCode::OK, "get keys lock timeout"};
+    debug("req {} finish at step count {}", req->req_id(), step_count);
+    if(success_flag){
+        return {grpc::StatusCode::OK, "get keys lock timeout"};
+    }else{
+        return {grpc::StatusCode::ABORTED, "error at phase "+std::to_string(step_count)};
+    }
 }
 
 void ProxyServerImpl::backend_update(){
@@ -244,6 +365,6 @@ ProxyServerImpl::~ProxyServerImpl(){
     update_thr_->join();
 }
 
-}
+}//end Bicache
 
 std::mutex Bicache::ProxyServerImpl::add_node_lock_;

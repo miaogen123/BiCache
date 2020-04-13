@@ -2,6 +2,7 @@
 #include "../pb/ProxyServer.grpc.pb.h"
 #include "../MyUtils/cpp/hash.h"
 #include "../MyUtils/cpp/fileOp.h"
+#include "../pb/KV_store.grpc.pb.h"
 #include <grpcpp/grpcpp.h>
 #include <string>
 #include <thread>
@@ -22,6 +23,10 @@ using grpc::ServerBuilder;
 using grpc::ServerContext;
 using grpc::Status;
 
+using KV_client = Bicache::KV_service::Stub;
+using KV_client_ptr = std::shared_ptr<KV_client>;
+using PosClientType = std::unordered_map<uint32_t, KV_client_ptr>;
+
 class ProxyServerImpl final: public ProxyServer::Service{
     //return the next node and the position of its
 public:
@@ -32,16 +37,20 @@ public:
     Status GetConfig(ServerContext* context, const GetConfigRequest* req, GetConfigReply* reply)override;
     Status Transaction(ServerContext* context, const TransactionRequest* req, TransactionReply* reply)override;
 
+    uint32_t get_key_successor(const std::string& key, uint32_t& key_pos);
     void backend_update();
     ~ProxyServerImpl();
 private:
     //需要有数据结构，方便的记录当前的哈希环的拓扑：要考虑动态的删减的情况，
     //需要有 host 和位置，以及位置和 host 的映射
+
+    std::mutex lock_for_client_;
+    PosClientType pos2client_;
     
-    uint32_t sleep_interval_in_locking_keys;
+    uint32_t sleep_interval_in_locking_keys_;
     //keep lock for keys in transaction
-    std::mutex lock_for_transaction_keys;
-    std::set<std::string> keys_occupied;
+    std::mutex lock_for_transaction_keys_;
+    std::set<std::string> keys_occupied_;
 
     std::unordered_map<std::string, int> host2pos_;
     std::map<int, std::string> pos2host_;

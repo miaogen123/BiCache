@@ -194,6 +194,20 @@ int KV_store_impl::is_valid(uint64_t& timestamp, int& req_id, uint64_t& key_pos,
   return {grpc::StatusCode::OK, ""};
 }
 
+//prepare 锁定资源
+::grpc::Status KV_store_impl::TransactionPrepare(::grpc::ServerContext* context, const ::Bicache::TransactionStepRequest* req, ::Bicache::TransactionStepReply* rsp){
+  debug("KV:transaction:prepare req_id:{} ", req->req_id());
+  return {grpc::StatusCode::OK, ""};
+}
+::grpc::Status KV_store_impl::TransactionCommit(::grpc::ServerContext* context, const ::Bicache::TransactionStepRequest* req, ::Bicache::TransactionStepReply* rsp){
+  debug("KV:transaction:commit req_id:{} ", req->req_id());
+  return {grpc::StatusCode::OK, ""};
+}
+::grpc::Status KV_store_impl::TransactionRollback(::grpc::ServerContext* context, const ::Bicache::TransactionStepRequest* req, ::Bicache::TransactionStepReply* rsp){
+  debug("KV:transaction:rollback req_id:{} ", req->req_id());
+  return {grpc::StatusCode::OK, ""};
+}
+
 //单独的线程用来服务
 void KV_store_impl::run_CH_node(){
   std::string CH_node_port = inner_conf_.get("CH_node_port");

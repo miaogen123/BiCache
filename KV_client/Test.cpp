@@ -93,9 +93,9 @@ public:
           auto host = rsp.ip_port_list(i);
           pos2host_[pos] = NodeStatus(host);
           info("pos {}, host {}", pos, host);
-          auto proxy_client = std::make_shared<Bicache::KV_service::Stub>(grpc::CreateChannel(
+          auto CH_client = std::make_shared<Bicache::KV_service::Stub>(grpc::CreateChannel(
               host, grpc::InsecureChannelCredentials()));
-          (*pos2kvclient_ptr_tmp)[pos]= proxy_client; 
+          (*pos2kvclient_ptr_tmp)[pos]= CH_client; 
         }
         virtual_node_num_ = rsp.virtual_node_num();
         info("get config successfully, node size {}", pos2host_.size());

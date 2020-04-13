@@ -26,6 +26,9 @@ service KV_service{
   // Sends a greeting
   rpc Get(GetRequest) returns (GetReply) {}
   rpc Set(SetRequest) returns (SetReply) {}
+  rpc TransactionPrepare(TransactionStepRequest) returns (TransactionStepReply) {}
+  rpc TransactionCommit(TransactionStepRequest) returns (TransactionStepReply) {}
+  rpc TransactionRollback(TransactionStepRequest) returns (TransactionStepReply) {}
 //  rpc Mget() returns () {}
 //  rpc Set() returns () {}
 //  rpc Mset() returns () {}
@@ -68,4 +71,18 @@ message SetReply{
   uint64 close_pos = 3;
   uint64 timestamp = 4;
   uint32 status_code = 255;
+}
+
+message TransactionStepRequest{
+  int32 req_id = 1;
+  //0 leave default, 1 prepare, 2 commit, 3 rollback
+  int32 step_id = 2;
+  //leave it empty, don't use
+  repeated uint32 operation_id = 3;
+  repeated string keys = 4;
+  repeated string values = 5;
+}
+
+message TransactionStepReply{
+  int32 status = 1;
 }

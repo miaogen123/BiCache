@@ -80,6 +80,24 @@ add_custom_command(
         "${hw_proto}"
       DEPENDS "${hw_proto}")
 
+get_filename_component(kv_proto "../proto/KV_store.proto" ABSOLUTE)
+get_filename_component(kv_proto_path "${kv_proto}" PATH)
+
+# Generated sources
+get_filename_component(kv_proto_srcs "${CMAKE_CURRENT_BINARY_DIR}/../pb/KV_store.pb.cc" ABSOLUTE)
+set(kv_proto_hdrs "${CMAKE_CURRENT_BINARY_DIR}/../pb/KV_store.pb.h")
+set(kv_grpc_srcs "${CMAKE_CURRENT_BINARY_DIR}/../pb/KV_store.grpc.pb.cc")
+set(kv_grpc_hdrs "${CMAKE_CURRENT_BINARY_DIR}/../pb/KV_store.grpc.pb.h")
+add_custom_command(
+      OUTPUT "${kv_proto_srcs}" "${kv_proto_hdrs}" "${kv_grpc_srcs}" "${kv_grpc_hdrs}"
+      COMMAND ${_PROTOBUF_PROTOC}
+      ARGS --grpc_out "${CMAKE_CURRENT_BINARY_DIR}/../pb"
+        --cpp_out "${CMAKE_CURRENT_BINARY_DIR}/../pb"
+        -I "${kv_proto_path}"
+        --plugin=protoc-gen-grpc="${_GRPC_CPP_PLUGIN_EXECUTABLE}"
+        "${kv_proto}"
+      DEPENDS "${kv_proto}")
+
 # Include generated *.pb.h files
 
 set(git_utils "../MyUtils/cpp/fileOp.cpp" "../MyUtils/cpp/hash.cpp")
@@ -93,6 +111,8 @@ foreach(_target
   add_executable(${_target} ${target_files} ${git_utils}
     ${hw_proto_srcs}
     ${hw_grpc_srcs} 
+    ${kv_proto_srcs}
+    ${kv_grpc_srcs} 
     ${local_utils}
     )
   target_link_libraries(${_target}
