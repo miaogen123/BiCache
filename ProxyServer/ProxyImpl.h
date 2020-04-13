@@ -49,6 +49,8 @@ private:
     
     uint32_t sleep_interval_in_locking_keys_;
     //keep lock for keys in transaction
+    std::uint32_t req_time_out;
+    std::uint32_t auto_commit_time_out;
     std::mutex lock_for_transaction_keys_;
     std::set<std::string> keys_occupied_;
 

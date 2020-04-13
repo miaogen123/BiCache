@@ -30,6 +30,18 @@ ProxyServerImpl::ProxyServerImpl(std::unordered_map<std::string, std::string>& c
             virtual_node_num_ = virtual_node_num;
         }
     }
+    auto ite_req_time_out= conf.find("req_time_out");
+    if(ite_req_time_out !=conf.end()){
+        req_time_out = std::atoi(ite_req_time_out->second.c_str());
+    }else{
+        req_time_out = 5;
+    }
+    auto ite_auto_commit_time_out= conf.find("auto_commit_time_out");
+    if(ite_auto_commit_time_out!=conf.end()){
+        auto_commit_time_out= std::atoi(ite_req_time_out->second.c_str());
+    }else{
+        auto_commit_time_out= 10;
+    }
     update_flag_ = true;
     info("proxy server working");
     //std::thread* tmp = new std::thread(&ProxyServerImpl::backend_update, this);
@@ -258,8 +270,12 @@ Status ProxyServerImpl::Transaction(ServerContext* context, const TransactionReq
             //这里是确定 req 是一定存在的
             auto& step_req = step_reqs[pos];
             step_req.set_step_id(1);
+            step_req.set_req_time_out(req_time_out);
+            step_req.set_auto_commit_time_out(auto_commit_time_out);
             auto& step_rsp = step_rsps[pos];
             grpc::ClientContext ctx;
+            auto deadline = std::chrono::system_clock::now() + std::chrono::milliseconds(req_time_out);
+            ctx.set_deadline(deadline);
 
             auto status = client->TransactionPrepare(&ctx, step_req, &step_rsp);
             if(!status.ok()){
@@ -272,45 +288,55 @@ Status ProxyServerImpl::Transaction(ServerContext* context, const TransactionReq
                 break;
             }
         }
-        debug("req_id {} transacton prepare ", req->req_id());
+        debug("req_id {} transacton prepare finished", req->req_id());
         step_count++;
         if(!success_flag){
-            break;
-        }
-        //commit 
-        for(auto& pair:clients){
-            auto& client = pair.second; 
-            int pos = pair.first;
-            //这里是确定 req 是一定存在的
-            auto& step_req = step_reqs[pos];
-            step_req.set_step_id(2);
-            auto& step_rsp = step_rsps[pos];
-            grpc::ClientContext ctx;
-            auto status = client->TransactionCommit(&ctx, step_req, &step_rsp);
-            if(!status.ok()){
-                success_flag= false;
-                debug("reqid {} step {} errormsg {}", req->req_id(), step_count, status.error_message());
-                break;
+            //rollback
+            for(auto& pair:clients){
+                auto& client = pair.second; 
+                int pos = pair.first;
+                //这里是确定 req 是一定存在的
+                auto& step_req = step_reqs[pos];
+                step_req.set_step_id(3);
+                auto& step_rsp = step_rsps[pos];
+                grpc::ClientContext ctx;
+                auto deadline = std::chrono::system_clock::now() + std::chrono::milliseconds(req_time_out);
+                ctx.set_deadline(deadline);
+                //直接回滚
+                //TODO::这里可以改成异步或者并行分发的情况
+                auto status = client->TransactionRollback(&ctx, step_req, &step_rsp);
             }
+            debug("req_id {} transacton rollbacked ", req->req_id());
+        }else{
+            //commit 
+            int count =0;
+            for(auto& pair:clients){
+                auto& client = pair.second; 
+                int pos = pair.first;
+                //这里是确定 req 是一定存在的
+                auto& step_req = step_reqs[pos];
+                step_req.set_step_id(2);
+                step_req.set_req_time_out(req_time_out);
+                step_req.set_auto_commit_time_out(auto_commit_time_out);
+                auto& step_rsp = step_rsps[pos];
+
+                grpc::ClientContext ctx;
+                auto deadline = std::chrono::system_clock::now() + std::chrono::milliseconds(req_time_out);
+                ctx.set_deadline(deadline);
+
+                auto status = client->TransactionCommit(&ctx, step_req, &step_rsp);
+                if(!status.ok()){
+                    success_flag= false;
+                    debug("reqid {} step {} errormsg {}", req->req_id(), step_count, status.error_message());
+                    break;
+                }
+                count++;
+            }
+            if(count !=clients.size()){
+                critical("NOT ALL TRANSACTIONS COMMITTED, PLEASE CHECK THIS TRANSACTION MANUALLY");
+            }
+            debug("req_id {} transacton committed", req->req_id());
         }
-        step_count++;
-        if(success_flag){
-            break;
-        }
-        debug("req_id {} transacton commit", req->req_id());
-        //rollback
-        for(auto& pair:clients){
-            auto& client = pair.second; 
-            int pos = pair.first;
-            //这里是确定 req 是一定存在的
-            auto& step_req = step_reqs[pos];
-            step_req.set_step_id(3);
-            auto& step_rsp = step_rsps[pos];
-            grpc::ClientContext ctx;
-            //直接回滚
-            auto status = client->TransactionRollback(&ctx, step_req, &step_rsp);
-        }
-        step_count++;
     }while(false);
     
     //结束，释放对于key的锁

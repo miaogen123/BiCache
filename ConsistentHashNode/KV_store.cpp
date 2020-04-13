@@ -196,6 +196,7 @@ int KV_store_impl::is_valid(uint64_t& timestamp, int& req_id, uint64_t& key_pos,
 
 //prepare 锁定资源
 ::grpc::Status KV_store_impl::TransactionPrepare(::grpc::ServerContext* context, const ::Bicache::TransactionStepRequest* req, ::Bicache::TransactionStepReply* rsp){
+  sleep(1);
   debug("KV:transaction:prepare req_id:{} ", req->req_id());
   return {grpc::StatusCode::OK, ""};
 }

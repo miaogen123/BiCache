@@ -81,6 +81,8 @@ message TransactionStepRequest{
   repeated uint32 operation_id = 3;
   repeated string keys = 4;
   repeated string values = 5;
+  uint32 req_time_out =6;
+  uint32 auto_commit_time_out =7; 
 }
 
 message TransactionStepReply{

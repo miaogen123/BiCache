@@ -1,3 +1,5 @@
 port 7790
 HeartBeatInternal 5
 virtualNodeNumber 16
+req_time_out 5
+auto_commit_time_out 10
