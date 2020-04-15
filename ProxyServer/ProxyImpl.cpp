@@ -228,7 +228,7 @@ Status ProxyServerImpl::Transaction(ServerContext* context, const TransactionReq
     }
 
     bool success_flag = true;
-    int step_count = 0;
+    int step_count = 1;
     do{
         //拿到key锁，开始协调事务，node要lock对应的资源，调用各个node的prepare方法 
         //这里为了方便就全部串行了
@@ -248,7 +248,7 @@ Status ProxyServerImpl::Transaction(ServerContext* context, const TransactionReq
                     return grpc::Status{grpc::StatusCode::ABORTED, "can't find client of pos " + std::to_string(pair.first)};
                 }else{
                     if(clients.find(pair.first)==clients.end()){
-                        //debug("add client for {} ", pair.first);
+                        debug("add client for {} ", pair.first);
                         clients[pair.first]=ite->second;
                     }
                 }
@@ -290,27 +290,11 @@ Status ProxyServerImpl::Transaction(ServerContext* context, const TransactionReq
         }
         debug("req_id {} transacton prepare finished with {} req", req->req_id(), step_reqs.size());
         step_count++;
-        if(!success_flag){
-            //rollback
-            for(auto& pair:clients){
-                auto& client = pair.second; 
-                int pos = pair.first;
-                //这里是确定 req 是一定存在的
-                auto& step_req = step_reqs[pos];
-                step_req.set_step_id(3);
-                auto& step_rsp = step_rsps[pos];
-                grpc::ClientContext ctx;
-                auto deadline = std::chrono::system_clock::now() + std::chrono::milliseconds(req_time_out);
-                ctx.set_deadline(deadline);
-                //直接回滚
-                //TODO::这里可以改成异步或者并行分发的情况
-                auto status = client->TransactionRollback(&ctx, step_req, &step_rsp);
-            }
-            debug("req_id {} transacton rollbacked ", req->req_id());
-        }else{
+        if(success_flag){
             //commit 
             int count =0;
             for(auto& pair:clients){
+                count++;
                 auto& client = pair.second; 
                 int pos = pair.first;
                 //这里是确定 req 是一定存在的
@@ -326,69 +310,90 @@ Status ProxyServerImpl::Transaction(ServerContext* context, const TransactionReq
 
                 auto status = client->TransactionCommit(&ctx, step_req, &step_rsp);
                 if(!status.ok()){
-                    success_flag= false;
                     debug("reqid {} to pos {} step {} errormsg {}", req->req_id(), pos, step_count, status.error_message());
-                    break;
+                }else{
+                    debug("reqid {} to pos {} step {} success", req->req_id(), pos, step_count);
                 }
-                count++;
             }
-            if(count !=clients.size()){
+            if(count != clients.size()){
                 critical("NOT ALL TRANSACTIONS COMMITTED, PLEASE CHECK THIS TRANSACTION MANUALLY");
+                //success_flag=false;
+            }else{
+                debug("req_id {} transacton committed, {} reqs send, {} reqs in total", req->req_id(), count, step_reqs.size());
             }
-            debug("req_id {} transacton committed, {} req send", req->req_id(), clients.size());
         }
-    }while(false);
-    
-    //结束，释放对于key的锁
-    {
-        std::unique_lock<std::mutex> w_lock(lock_for_transaction_keys_);
-        for(auto& key:keys){
-            //auto ite= keys_occupied.find(key);
-            keys_occupied_.erase(key);
+        if(success_flag){
+            break;
         }
-        debug("release keys in transaction");
+        //rollback
+        for(auto& pair:clients){
+            auto& client = pair.second; 
+            int pos = pair.first;
+            //这里是确定 req 是一定存在的
+            auto& step_req = step_reqs[pos];
+            step_req.set_step_id(3);
+            auto& step_rsp = step_rsps[pos];
+            grpc::ClientContext ctx;
+            auto deadline = std::chrono::system_clock::now() + std::chrono::milliseconds(req_time_out);
+            ctx.set_deadline(deadline);
+            //直接回滚
+            //TODO::这里可以改成异步或者并行分发的情况
+            auto status = client->TransactionRollback(&ctx, step_req, &step_rsp);
+            debug("req_id {} to pos {} start to ROLLBACK", req->req_id(), pos);
+        }
+        debug("req_id {} transacton rollbacked ", req->req_id());
+}while(false);
+
+//结束，释放对于key的锁
+{
+    std::unique_lock<std::mutex> w_lock(lock_for_transaction_keys_);
+    for(auto& key:keys){
+        //auto ite= keys_occupied.find(key);
+        keys_occupied_.erase(key);
     }
-    debug("req {} finish at step count {}", req->req_id(), step_count);
-    if(success_flag){
-        return {grpc::StatusCode::OK, "get keys lock timeout"};
-    }else{
-        return {grpc::StatusCode::ABORTED, "error at phase "+std::to_string(step_count)};
-    }
+    debug("release keys in transaction");
+}
+debug("req {} finish at step count {}", req->req_id(), step_count);
+if(success_flag){
+    return {grpc::StatusCode::OK, "get keys lock timeout"};
+}else{
+    return {grpc::StatusCode::ABORTED, "error at phase "+std::to_string(step_count)};
+}
 }
 
 void ProxyServerImpl::backend_update(){
-    uint64_t seconds;
-    while(update_flag_){
-        sleep(1);
-        seconds = get_miliseconds();
-        info("start to clean unlinked node");
-        //printf("current time %ld", seconds);
-        pos_HB_lock_.lock();
-        auto ite = pos_HB_.begin();
-        auto ite_end = pos_HB_.end();
-        for(;ite!=pos_HB_.end();){
-            if(ite->second < seconds){
-                add_node_lock_.lock();
-                auto host_ptr = pos2host_.find(ite->first);
-                if(host_ptr!=pos2host_.end()){
-                    host2pos_.erase(host_ptr->second);
-                    pos2kvhost_.erase(host_ptr->first);
-                    pos2host_.erase(host_ptr);
-                    warn("from proxy erase node {}: current time {}, node register time {}", host_ptr->first, seconds, ite->second);
-                }
-                add_node_lock_.unlock();
-                ite=pos_HB_.erase(ite);
-            }else{
-                ite++;
+uint64_t seconds;
+while(update_flag_){
+    sleep(1);
+    seconds = get_miliseconds();
+    info("start to clean unlinked node");
+    //printf("current time %ld", seconds);
+    pos_HB_lock_.lock();
+    auto ite = pos_HB_.begin();
+    auto ite_end = pos_HB_.end();
+    for(;ite!=pos_HB_.end();){
+        if(ite->second < seconds){
+            add_node_lock_.lock();
+            auto host_ptr = pos2host_.find(ite->first);
+            if(host_ptr!=pos2host_.end()){
+                host2pos_.erase(host_ptr->second);
+                pos2kvhost_.erase(host_ptr->first);
+                pos2host_.erase(host_ptr);
+                warn("from proxy erase node {}: current time {}, node register time {}", host_ptr->first, seconds, ite->second);
             }
+            add_node_lock_.unlock();
+            ite=pos_HB_.erase(ite);
+        }else{
+            ite++;
         }
-        pos_HB_lock_.unlock();
     }
+    pos_HB_lock_.unlock();
+}
 }
 
 ProxyServerImpl::~ProxyServerImpl(){
-    update_flag_ = false;
-    update_thr_->join();
+update_flag_ = false;
+update_thr_->join();
 }
 
 }//end Bicache

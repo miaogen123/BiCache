@@ -214,10 +214,13 @@ void KV_store_impl::release_resource_in_transaction(int req_id){
 
   auto& single_trans = ite->second;
   std::unique_lock<std::shared_mutex> w_lock(rw_lock_for_trans_);
+  std::string tmp_key;
   for(auto& key:single_trans.keys){
-    debug("KV: releasing transaction resource, erase key {}",key);
+    //TODO::only for debug
+    tmp_key+=(key+" ");
     keys_in_trans_.erase(key);
   }
+  debug("KV: releasing transaction resource, erase key {}",tmp_key);
   w_lock.unlock();
 
   //delete transaction
@@ -230,10 +233,12 @@ void KV_store_impl::release_resource_in_transaction(int req_id){
   debug("KV:transaction:prepare req_id:{} ", req->req_id());
   //构建 transaction
   SingleTransaction single_trans;
+  single_trans.expiera_at=get_miliseconds()+req->req_time_out();
   for(auto i=0;i<req->keys_size();i++){
     auto pos = MurmurHash64B(req->keys(i).c_str(), req->keys(i).size())%virtual_node_num_;
     if(ch_node_->in_range(pos)){
       single_trans.keys.push_back(req->keys(i));
+      single_trans.values.push_back(req->values(i));
     }else{
       debug("KV:trans aborted becauseof key {} not in my range");
       release_resource_in_transaction(req->req_id());
@@ -256,9 +261,26 @@ void KV_store_impl::release_resource_in_transaction(int req_id){
 }
 
 ::grpc::Status KV_store_impl::TransactionCommit(::grpc::ServerContext* context, const ::Bicache::TransactionStepRequest* req, ::Bicache::TransactionStepReply* rsp){
-  usleep(2000000);
   //不再检测正确性，直接搞set
+  sleep(1);
   debug("KV:transaction:commit req_id:{} ", req->req_id());
+  std::unique_lock<std::shared_mutex> w_lock_to_check(transactions_.w_lock);
+  auto ite= transactions_.transactions.find(req->req_id());
+  if(ite==transactions_.transactions.end()){
+    debug("req_id {} already expired", req->req_id());
+    return {grpc::StatusCode::ABORTED, ""};
+  }
+  w_lock_to_check.unlock();
+  int count=0;
+  //TODO::should write with rw_lock
+  for(auto i=0;i<ite->second.keys.size();i++){
+    auto key = ite->second.keys[i];
+    auto value = ite->second.values[i];
+    inner_cache_.insert({key, std::make_pair<uint64_t, std::string>(std::numeric_limits<uint64_t>::max(), std::move(value))});
+    count++;
+  }
+  debug("req_id {} update {} keys", ite->first, count);
+  release_resource_in_transaction(ite->first);
   return {grpc::StatusCode::OK, ""};
 }
 
@@ -390,6 +412,22 @@ void KV_store_impl::backend_update(){
         }
       }
       //interval=200ms时，6s清理一次
+      if(count==10){
+        std::unique_lock<std::shared_mutex> w_lock_to_check(transactions_.w_lock);
+        auto cur_ts = get_miliseconds();
+        std::vector<int> ids;
+        for(auto ite=transactions_.transactions.begin(); ite != transactions_.transactions.end();ite++){
+          if(ite->second.expiera_at <= cur_ts){
+            ids.push_back(ite->first);
+          }
+        }
+        w_lock_to_check.unlock();
+        for(auto& id:ids){
+          release_resource_in_transaction(id);
+          debug("KV:periodically release resourse of id {}", id);
+        }
+      }
+
       if(count==30){
         info("KV:clean log: clean {} expire req_ids_, keysize {}", expire_clean_count++, inner_cache_.size());
         count=0;
