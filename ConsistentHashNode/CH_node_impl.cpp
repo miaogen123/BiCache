@@ -670,6 +670,7 @@ void CH_node_impl::stablize(){
 
   do{
     //这种每个循环都必须要执行的，就放在循环的前面好了
+    int count = 10;
     usleep(stablize_interval_);
     uint32_t finger_num_to_fix = dis(gen);
     // 如果 stablize 过程中发生了节点的变更，发出 info log
@@ -688,7 +689,10 @@ void CH_node_impl::stablize(){
         info("stablize:node {}, finger {} changed from {} to {}, next_node {}", cur_pos_, item.start(), pre_succ, successor, next_pos_);
       }
       //TODO:: 访问最后一个参数的时候有可能出core，也就是说 string.c_str() 参数访问的时候是可能出core的
-      info("stablize:node {}, finger {}, {}, {}, {}", cur_pos_, item.start(), item.interval(), item.successor(), item.ip_port());
+      if(10==count){
+        info("stablize:node {}, finger {}, {}, {}, {}", cur_pos_, item.start(), item.interval(), item.successor(), item.ip_port());
+        count=0;
+      }
     }
   }while(!exit_flag_);
 }
