@@ -94,7 +94,6 @@ int main(int argc, char** argv) {
       info("write");
       write_count++;
     }
-    usleep(1000);
   }while(true);
   return 0;
 }
