@@ -270,12 +270,21 @@ public:
       return -1;
     }else{
       debug("transaction commited");
+      int count_rsp=rsp.values_size()-1;
       for(auto i=0;i<operation_ids.size();i++){
         if(operation_ids[i]!=0){
-          if(rsp.keys(i)!=keys[i]){
-            critical("transaction ret ind {}, ret {}, origin {}", i, keys[i], rsp.keys(i));
+          bool found=false;
+          int j= count_rsp;
+          for(j = count_rsp;j>=0;j--){
+            if(rsp.keys(j)==keys[i]){
+              found = true;
+              break;
+            }
+          }
+          if(found){
+            values[i]=rsp.values(j);
           }else{
-            values[i]=rsp.values(i);
+            critical("transaction ret read ind {} key {}not found ", i, keys[i]);
           }
         }
       }

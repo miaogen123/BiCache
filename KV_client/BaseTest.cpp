@@ -117,6 +117,15 @@ int main(int argc, char** argv) {
       operation_ids.resize(keys.size());
       debug("kes {} values {}", keys.size(), values.size());
       kvc.Transaction(keys, values, operation_ids);
+    }else if(input_value==6){
+      int i=0;
+      int count = 100000;
+      do{
+        kvc.Set(std::to_string(i), std::to_string(i+5));
+        i++;
+        count--;
+      }while(count>0);
+      info("100,000 keys write down");
     }
     if(input_value !=4){
       std::cin>>input_value;

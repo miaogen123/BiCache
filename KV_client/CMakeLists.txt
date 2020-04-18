@@ -127,6 +127,7 @@ foreach(_target
   BaseTest
   TestReadWrite
   TestTransactionFunc
+  TestTransactionPerformance
   )
   add_executable(${_target}
      ${hw_proto_srcs}

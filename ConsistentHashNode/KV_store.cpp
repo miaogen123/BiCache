@@ -309,7 +309,7 @@ void KV_store_impl::release_resource_in_transaction(int req_id){
     auto ite_to_ret=inner_cache_.find(key);
     if(0==operation_id){
       auto value = ite->second.values[i];
-      info("commit write key {} {}", key, value);
+      //debug("commit write key {} {}", key, value);
       if(ite_to_ret!=inner_cache_.end()){
         ite_to_ret->second.first=std::numeric_limits<uint64_t>::max();
         ite_to_ret->second.second=value;
@@ -320,9 +320,10 @@ void KV_store_impl::release_resource_in_transaction(int req_id){
       if(ite_to_ret!=inner_cache_.end()){
         value_to_ret=ite_to_ret->second.second;
       }
+      //WARNING这个地方需要注意，可能会因为顺序出现问题
       rsp->add_keys(key);
       rsp->add_values(value_to_ret);
-      info("commit read key {} {}", key, value_to_ret);
+      //debug("commit read key {} {}", key, value_to_ret);
     }
     count++;
   }
