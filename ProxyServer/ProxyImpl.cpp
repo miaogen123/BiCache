@@ -12,8 +12,8 @@ using grpc::StatusCode;
 //静态成员初始化
 uint64_t get_miliseconds(){
     using namespace std::chrono;
-    steady_clock::duration d;
-    d = steady_clock::now().time_since_epoch();
+    system_clock::duration d;
+    d = system_clock::now().time_since_epoch();
     return duration_cast<milliseconds>(d).count();
 }
 
