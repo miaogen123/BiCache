@@ -251,18 +251,16 @@ public:
     return 0;
   }
 
-  int Transaction(const std::vector<std::string>& keys, const std::vector<std::string>& values, std::vector<uint32_t> operation_ids){
+  int Transaction(const std::vector<std::string>& keys, std::vector<std::string>& values, std::vector<uint32_t> operation_ids){
     //提交事务
-    if(keys.size()!=values.size()){
-      critical("transaction input with diff length:{} {}",keys.size(), values.size());
-      return -1;
-    }
     Bicache::TransactionRequest req;
     Bicache::TransactionReply rsp;
     req.set_req_id(getRandomInt());
+    info("req id {} ", req.req_id());
     for(auto i =0 ;i<keys.size();i++){
       req.add_operation_id(operation_ids[i]);
       req.add_keys(keys[i]);
+      //if(operation_ids[i]==0)
       req.add_values(values[i]);
     }
     grpc::ClientContext ctx;
@@ -272,6 +270,15 @@ public:
       return -1;
     }else{
       debug("transaction commited");
+      for(auto i=0;i<operation_ids.size();i++){
+        if(operation_ids[i]!=0){
+          if(rsp.keys(i)!=keys[i]){
+            critical("transaction ret ind {}, ret {}, origin {}", i, keys[i], rsp.keys(i));
+          }else{
+            values[i]=rsp.values(i);
+          }
+        }
+      }
     }
     return 0;
   }

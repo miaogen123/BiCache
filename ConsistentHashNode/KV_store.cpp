@@ -305,17 +305,24 @@ void KV_store_impl::release_resource_in_transaction(int req_id){
   std::string value_to_ret("");
   for(auto i=0;i<ite->second.keys.size();i++){
     auto key = ite->second.keys[i];
-    auto value = ite->second.values[i];
     auto operation_id = ite->second.operation_id[i];
+    auto ite_to_ret=inner_cache_.find(key);
     if(0==operation_id){
-      inner_cache_.insert({key, std::make_pair<uint64_t, std::string>(std::numeric_limits<uint64_t>::max(), std::move(value))});
+      auto value = ite->second.values[i];
+      info("commit write key {} {}", key, value);
+      if(ite_to_ret!=inner_cache_.end()){
+        ite_to_ret->second.first=std::numeric_limits<uint64_t>::max();
+        ite_to_ret->second.second=value;
+      }else{
+        inner_cache_.insert({key, std::make_pair<uint64_t, std::string>(std::numeric_limits<uint64_t>::max(), std::move(value))});
+      }
     }else{
-      auto ite_to_ret=inner_cache_.find(key);
       if(ite_to_ret!=inner_cache_.end()){
         value_to_ret=ite_to_ret->second.second;
       }
       rsp->add_keys(key);
       rsp->add_values(value_to_ret);
+      info("commit read key {} {}", key, value_to_ret);
     }
     count++;
   }

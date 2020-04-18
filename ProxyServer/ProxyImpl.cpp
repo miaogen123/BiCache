@@ -180,7 +180,6 @@ Status ProxyServerImpl::GetConfig(ServerContext* context, const GetConfigRequest
 Status ProxyServerImpl::Transaction(ServerContext* context, const TransactionRequest* req, TransactionReply* rsp){
     //希望多个值，要么进行修改，要么就全部回滚
     //不给支持设置超时
-    debug("get transaction...");
     std::vector<int> pos_list;
     std::vector<std::string> keys;
     std::vector<std::string> values;
@@ -270,6 +269,7 @@ Status ProxyServerImpl::Transaction(ServerContext* context, const TransactionReq
             //这里是确定 req 是一定存在的
             auto& step_req = step_reqs[pos];
             step_req.set_step_id(1);
+            step_req.set_req_id(req->req_id());
             step_req.set_req_time_out(req_time_out);
             step_req.set_auto_commit_time_out(auto_commit_time_out);
             auto& step_rsp = step_rsps[pos];
@@ -299,6 +299,7 @@ Status ProxyServerImpl::Transaction(ServerContext* context, const TransactionReq
                 int pos = pair.first;
                 //这里是确定 req 是一定存在的
                 auto& step_req = step_reqs[pos];
+                step_req.set_req_id(req->req_id());
                 step_req.set_step_id(2);
                 step_req.set_req_time_out(req_time_out);
                 step_req.set_auto_commit_time_out(auto_commit_time_out);
@@ -310,9 +311,9 @@ Status ProxyServerImpl::Transaction(ServerContext* context, const TransactionReq
 
                 auto status = client->TransactionCommit(&ctx, step_req, &step_rsp);
                 if(!status.ok()){
-                    debug("reqid {} to pos {} step {} errormsg {}", req->req_id(), pos, step_count, status.error_message());
+                    critical("reqid {} to pos {} step {} errormsg {}", req->req_id(), pos, step_count, status.error_message());
                 }else{
-                    debug("reqid {} to pos {} step {} success", req->req_id(), pos, step_count);
+                    //debug("reqid {} to pos {} step {} success", req->req_id(), pos, step_count);
                     for(auto i=0;i<step_rsp.keys_size();i++){
                         rsp->add_keys(step_rsp.keys(i));
                         rsp->add_values(step_rsp.values(i));

@@ -126,6 +126,7 @@ message(STATUS ${curr_dir_all_cpp})
 foreach(_target
   BaseTest
   TestReadWrite
+  TestTransactionFunc
   )
   add_executable(${_target}
      ${hw_proto_srcs}
