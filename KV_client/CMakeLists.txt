@@ -120,11 +120,12 @@ add_compile_options("-O0")
 include_directories("${CMAKE_CURRENT_BINARY_DIR}/build")
 message(STATUS ${CMAKE_CURRENT_BINARY_DIR})
 
-file(GLOB curr_dir_all_cpp "Test.cpp")
+file(GLOB curr_dir_all_cpp "BaseTest.cpp")
 message(STATUS ${curr_dir_all_cpp})
 # Targets greeter_[async_](client|server)
 foreach(_target
-  kv_client
+  BaseTest
+  TestReadWrite
   )
   add_executable(${_target}
      ${hw_proto_srcs}
@@ -133,7 +134,7 @@ foreach(_target
      ${ch_grpc_srcs}
      ${kv_proto_srcs}
      ${kv_grpc_srcs}
-     ${curr_dir_all_cpp}
+     "${_target}.cpp"
      ${local_utils}
      ${git_utils})
   target_link_libraries(${_target}

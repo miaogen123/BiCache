@@ -2,12 +2,27 @@
 #include <limits>
 #include <cstdio>
 #include <cmath>
+#include <atomic>
 #include <random>
 #include <chrono>
 #include <unistd.h>
 #include "KV_store.h"
 
 extern std::atomic<int> SystemStatus;
+//to record throughput
+//TODO::Make it graceful
+std::atomic<uint64_t> get_count;
+std::atomic<uint64_t> set_count;
+uint64_t get_throughput=0;
+uint64_t set_throughput=0;
+std::atomic<uint64_t> prepare_count;
+std::atomic<uint64_t> commit_count;
+uint64_t prepare_throughput=0;
+uint64_t commit_throughput=0;
+
+void output_throughput(int signum){
+  info("get_throughput {}, set_throughput {}, prepare_throughput {}, commit_throughput {}", get_throughput, set_throughput, prepare_throughput, commit_throughput);
+}
 
 KV_store_impl::KV_store_impl(Conf& conf):inner_conf_(conf){
   auto bucket_size = conf.get("bucket_size", "10000");
@@ -19,6 +34,7 @@ KV_store_impl::KV_store_impl(Conf& conf):inner_conf_(conf){
   //inner_cache_["hello"]=std::make_pair<uint64_t, std::string>(get_miliseconds(), "world");
   increment_data_keys_.reset(new std::vector<std::string>());
   backup_increment_data_keys_.reset(new std::vector<std::string>());
+  signal(SIGINT, output_throughput);
 }
 
 void KV_store_impl::init(){
@@ -91,6 +107,7 @@ int KV_store_impl::is_valid(uint64_t& timestamp, int& req_id, uint64_t& key_pos,
 
   //read replica 没有加锁可能会有问题，这里留个心
   //不做过多的验证，有数据就行
+  get_count++;
   if(req->read_replica()){
     std::shared_lock<std::shared_mutex> r_lock(backup_.lock);
     auto backup_cache = backup_.backup_cache;
@@ -149,6 +166,7 @@ int KV_store_impl::is_valid(uint64_t& timestamp, int& req_id, uint64_t& key_pos,
     info("KV:system status is {}", SystemStatus.load());
     return {grpc::StatusCode::ABORTED, "system is maintaning"};
   }
+  set_count++;
   uint64_t key_pos = req->pos_of_key();
   auto& key = req->key();
   auto timestamp = req->timestamp();
@@ -230,6 +248,7 @@ void KV_store_impl::release_resource_in_transaction(int req_id){
 
 //prepare 锁定资源
 ::grpc::Status KV_store_impl::TransactionPrepare(::grpc::ServerContext* context, const ::Bicache::TransactionStepRequest* req, ::Bicache::TransactionStepReply* rsp){
+  prepare_count++;
   debug("KV:transaction:prepare req_id:{} ", req->req_id());
   //构建 transaction
   SingleTransaction single_trans;
@@ -262,7 +281,7 @@ void KV_store_impl::release_resource_in_transaction(int req_id){
 
 ::grpc::Status KV_store_impl::TransactionCommit(::grpc::ServerContext* context, const ::Bicache::TransactionStepRequest* req, ::Bicache::TransactionStepReply* rsp){
   //不再检测正确性，直接搞set
-  sleep(1);
+  commit_count++;
   debug("KV:transaction:commit req_id:{} ", req->req_id());
   std::unique_lock<std::shared_mutex> w_lock_to_check(transactions_.w_lock);
   auto ite= transactions_.transactions.find(req->req_id());
@@ -319,6 +338,7 @@ void KV_store_impl::backend_update(){
   //TODO::这里先清理reqids，后面添加了 key 超时以后再设置 key 清理的逻辑
   int count = 0;
   int expire_clean_count = 0;
+  int UP_COUNT=30;
   do{
     count++;
     usleep(clean_interval_);
@@ -393,7 +413,7 @@ void KV_store_impl::backend_update(){
       //这里让他每秒走一次就好了，因为量不大，就直接遍历就好了
       //用来计算吞吐
       if(count==10){
-        int time_elasp = count * clean_interval_ /1000000 +1;
+        int time_elasp = UP_COUNT * clean_interval_ /1000000 ;
         uint64_t cur_count =0;
         uint64_t pre_count =0;
         for(int i=0;i<virtual_node_num_;i++){
@@ -402,7 +422,7 @@ void KV_store_impl::backend_update(){
           if(cur_count!=0){
             auto throughput = ((cur_count - pre_count)/time_elasp );
             if(throughput > read_limit_){
-              info("KV:pos{}, get throughput {} in {}s, overloaded", i, throughput, time_elasp);
+              info("KV:pos{}, get read_throughput {} in {}s, overloaded", i, throughput, time_elasp);
               posStatus_[i].overloaded= true;
             }else{
               posStatus_[i].overloaded= false;
@@ -410,6 +430,21 @@ void KV_store_impl::backend_update(){
             posStatus_[i].pre_count=cur_count;
           }
         }
+        //TODO::Make it graceful
+        static uint64_t pre_set=0, pre_get=0, pre_prepare=0, pre_commit=0;
+        auto cur_get=get_count.load();
+        auto cur_set=set_count.load();
+        auto cur_prepare=prepare_count.load();
+        auto cur_commit=commit_count.load();
+        get_throughput=(cur_get-pre_get)/time_elasp;
+        set_throughput=(cur_set-pre_set)/time_elasp;
+        prepare_throughput=(cur_prepare-pre_prepare)/time_elasp;
+        commit_throughput=(cur_commit-pre_commit)/time_elasp;
+        pre_get=cur_get;
+        pre_set=cur_set;
+        pre_prepare=cur_prepare;
+        pre_commit=cur_commit;
+        //debug("get {} set {} time{}", get_throughput, set_throughput, time_elasp);
       }
       //interval=200ms时，6s清理一次
       if(count==10){
@@ -428,7 +463,7 @@ void KV_store_impl::backend_update(){
         }
       }
 
-      if(count==30){
+      if(count==UP_COUNT){
         info("KV:clean log: clean {} expire req_ids_, keysize {}", expire_clean_count++, inner_cache_.size());
         count=0;
         expire_clean_count=0;

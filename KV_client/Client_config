@@ -2,3 +2,4 @@ proxy_ip 0.0.0.0
 proxy_port 7790
 expire_time 0
 read_backup true
+read_limit 90

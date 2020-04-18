@@ -44,6 +44,8 @@ CH_node_impl::CH_node_impl(Conf& conf){
   }else{
     mbit = to_ret;
   }
+  auto stablize_interval=conf.get("stablize_interval", "100000");
+  stablize_interval_ = std::atoi(stablize_interval.c_str());
   update_thr_ = std::make_shared<std::thread>(&CH_node_impl::HB_to_proxy, this);
   stablize_thr_ = std::make_shared<std::thread>(&CH_node_impl::stablize, this);
   push_data_thr_ = std::make_shared<std::thread>(&CH_node_impl::push_increment_data, this);
@@ -332,7 +334,7 @@ Status CH_node_impl::FindPreDecessor(::grpc::ServerContext* context, const ::Bic
       reply->set_node(cur_pos_);
       reply->set_successor(cur_pos_);
       reply->set_succ_ip_port(cur_host_ip_ +":" +cur_host_port_);
-      info("Ser: Node {}: findpre {} from {}, found:{}, successor {}", cur_pos_, pos, req->node(), reply->found(), reply->successor());
+      //info("Ser: Node {}: findpre {} from {}, found:{}, successor {}", cur_pos_, pos, req->node(), reply->found(), reply->successor());
       return {grpc::StatusCode::OK, ""};
   }
   // 这里也类似的逻辑，同样需要判断
@@ -354,7 +356,7 @@ Status CH_node_impl::FindPreDecessor(::grpc::ServerContext* context, const ::Bic
       }
       reply->set_succ_ip_port(pos2host_[close_one]);
   }
-  info("Ser: Node {}: findpre {} from {}, found:{}, successor {}", cur_pos_, pos, req->node(), reply->found(), reply->successor());
+//  info("Ser: Node {}: findpre {} from {}, found:{}, successor {}", cur_pos_, pos, req->node(), reply->found(), reply->successor());
   return {grpc::StatusCode::OK, ""};
 }
 
@@ -668,9 +670,9 @@ void CH_node_impl::stablize(){
   static std::mt19937 gen(rd());
   std::uniform_int_distribution<uint32_t> dis(0, mbit-1);
 
+  int count = 10;
   do{
     //这种每个循环都必须要执行的，就放在循环的前面好了
-    int count = 10;
     usleep(stablize_interval_);
     uint32_t finger_num_to_fix = dis(gen);
     // 如果 stablize 过程中发生了节点的变更，发出 info log
@@ -693,6 +695,7 @@ void CH_node_impl::stablize(){
         info("stablize:node {}, finger {}, {}, {}, {}", cur_pos_, item.start(), item.interval(), item.successor(), item.ip_port());
         count=0;
       }
+      count++;
     }
   }while(!exit_flag_);
 }
@@ -741,6 +744,20 @@ void CH_node_impl::HB_to_proxy(){
           pre_node_ = pp_pos_;
           pre_node_ip_port_ = pp_node_ip_port_;
           //这时上一个节点已经发生了变化，应该通知上层
+
+          //merge backup 数据
+          //TODO::在心跳线程中 merge 数据可能会导致，心跳包超时，我这里超时就设置的大一些。
+          auto& inner_cache = kv_store_p_->get_mutable_inner_cache();
+          auto& backup_data = kv_store_p_->get_backup();
+          std::shared_lock<std::shared_mutex> w_lock(kv_store_p_->get_inner_cache_lock());
+          for(auto& val:backup_data.backup_cache){
+            //理论上 backup_data 和 inner_cache 的数据不会相交，所以没有检测
+            inner_cache.insert(std::make_pair(std::string(val.first), val.second));
+          }
+          backup_data.backup_cache.clear();
+          info("clearing all the keys of backup");
+          w_lock.unlock();
+
           if(pre_node_ == cur_pos_){
             info("find pre_node_ == cur_pos_, which means there are only one node");
             next_pos_ = cur_pos_;
@@ -750,18 +767,6 @@ void CH_node_impl::HB_to_proxy(){
               finger_table_[i].set_successor(cur_pos_);
             }
           }else{
-            //merge backup 数据
-            //TODO::在心跳线程中 merge 数据可能会导致，心跳包超时，我这里超时就设置的大一些。
-            auto& inner_cache = kv_store_p_->get_mutable_inner_cache();
-            auto& backup_data = kv_store_p_->get_backup();
-            std::shared_lock<std::shared_mutex> w_lock(kv_store_p_->get_inner_cache_lock());
-            for(auto& val:backup_data.backup_cache){
-              //理论上 backup_data 和 inner_cache 的数据不会相交，所以没有检测
-              inner_cache.insert(std::make_pair(std::string(val.first), val.second));
-            }
-            backup_data.backup_cache.clear();
-            info("clearing all the keys of backup");
-            w_lock.unlock();
             //Get add data of pre
             Bicache::GetDataRequest getDataReq;
             getDataReq.set_ip(cur_host_ip_);

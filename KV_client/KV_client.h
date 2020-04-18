@@ -1,3 +1,5 @@
+#pragma once
+
 #include <iostream>
 #include <map>
 #include <unordered_map>
@@ -15,7 +17,6 @@
 #include "../utils/conf.h"
 #include "../MyUtils/cpp/hash.h"
 #include "../MyUtils/cpp/myutils.h"
-#include "../MyUtils/cpp/fileOp.h"
 #include "../pb/ProxyServer.grpc.pb.h"
 #include "../pb/KV_store.grpc.pb.h"
 #include "spdlog/spdlog.h"
@@ -152,7 +153,8 @@ public:
       warn("no client of pos {}", key_successor);
       return "";
     }else{
-      info("get client of pos {}, key {}", key_successor, key);
+      //WARN: enable only if you do need this
+      //debug("get client of pos {}, key {}", key_successor, key);
     }
     auto kv_client = ite_client->second;
     Bicache::GetRequest req;
@@ -173,7 +175,8 @@ public:
       return "";
     }
     if(rsp.is_found()){
-      info("get key {}: value {} from pos {}", key, rsp.value(), key_successor);
+      debug("get key {}: value {} from pos {}", key, rsp.value(), key_successor);
+      return rsp.value();
     }else{
       info("404 not found", key, rsp.value(), key_successor);
       if(rsp.status_code()==-3){
@@ -244,9 +247,10 @@ public:
     }
     // only for debug
     //auto key_hash = MurmurHash64B(key.c_str(), key.size())%virtual_node_num_;
-    info("set key {}: value {} keypos {} from pos {}", key, value, key_pos, key_successor);
+    debug("set key {}: value {} keypos {} from pos {}", key, value, key_pos, key_successor);
     return 0;
   }
+
   int Transaction(const std::vector<std::string>& keys, const std::vector<std::string>& values){
     //提交事务
     if(keys.size()!=values.size()){
@@ -278,81 +282,3 @@ private:
   //这里到不同的节点的client，用指针存储效果会更好，unique_ptr存储的话，就不要读写锁了
   std::unique_ptr<PosClientType> pos2kvclient_ptr_;
 };
-
-int main(int argc, char** argv) {
-
-  //spdlog::set_level(spdlog::level::info);
-  spdlog::set_level(spdlog::level::debug);
-  spdlog::set_pattern("[%H:%M:%S:%e] [%^%L%$] [tid %t] %v");
-  //std::unordered_map<std::string, std::string> conf;
-  std::string port;
-  
-  Conf conf("Client_config");
-  expire_time = atoi(conf.get("expire_time", "20000").c_str());
-  KV_client kvc(conf);
-  kvc.GetTology();
-  
-
-  std::vector<std::string> keys;
-  std::vector<std::string> values;
-  for(auto i = 0 ;i<1;i++){
-    std::string key = getRandStr(16);
-    std::string value = getRandStr(16);
-    keys.push_back(key);
-    values.push_back(value);
-    kvc.Set(key, value);
-  }
-  for(auto i = 0 ;i<1;i++){
-    std::string key = keys[i];
-    kvc.Get(key);
-    usleep(400000);
-  }
-  int input_value=0;
-  int i = 0;
-  do{
-    std::string key;
-    std::string value;
-    if(input_value == 0){
-      key = getRandStr(16);
-      value = getRandStr(16);
-      keys.push_back(key);
-      values.push_back(value);
-      kvc.Set(key, value);
-      i++;
-    }else if(input_value == 1){
-      key = keys[i];
-      kvc.Get(key);
-    }else if(input_value == 2  ){
-      std::cin>>key;
-      kvc.Get(key);
-    }else if(input_value == 3){
-      std::cin >> key ;
-      std::cin >> value ;
-      kvc.Set(key, value);
-    }else if(input_value == 4){
-      //test get
-      key = keys[i];
-      kvc.Get(key);
-    }else if(input_value == 5){
-      //transaction
-      std::vector<std::string> keys;
-      std::vector<std::string> values;
-      std::string keys_one_line;
-      std::string values_one_line;
-
-      //这玩意有点坑啊
-      std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n' );
-      std::getline(std::cin,keys_one_line, '\n');
-      std::getline(std::cin,values_one_line, '\n');
-
-      SplitString(keys_one_line, keys, ' ');
-      SplitString(values_one_line, values, ' ');
-      kvc.Transaction(keys, values);
-    }
-    if(input_value !=4){
-      std::cin>>input_value;
-      usleep(1000);
-    }
-  }while(input_value!=9);
-  return 0;
-}
