@@ -31,6 +31,11 @@ void start_kv_service(Conf& conf){
 
 int main() {
   //spdlog::set_level(spdlog::level::info);
+//  auto t = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+//  std::stringstream ss;
+//	ss << std::put_time(std::localtime(&t), "%Y-%m-%d_%H:%M:%S.log");
+//	std::string str = ss.str();
+//  spdlog::set_default_logger(std::make_shared<spdlog::>("file_logger", "KV"+str, 1024*1024*1024, 100));
   spdlog::set_level(spdlog::level::debug);
   spdlog::set_pattern("[%H:%M:%S:%e] [%^%L%$] [tid %t] %v");
   Conf conf("CH_config");

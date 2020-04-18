@@ -46,7 +46,7 @@ private:
 
     //这个地方还是要加锁的啊、加紧搞吧，搞完然后要写摘要，写提纲
     //读写锁就读写锁吧
- 
+    bool enable_transaction_barrier_=false; 
     std::mutex lock_for_client_;
     PosClientType pos2client_;
     

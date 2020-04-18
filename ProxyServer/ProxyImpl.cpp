@@ -43,6 +43,10 @@ ProxyServerImpl::ProxyServerImpl(std::unordered_map<std::string, std::string>& c
         auto_commit_time_out= 10;
     }
     update_flag_ = true;
+    auto ite_enable_transaction_barrier=conf.find("enable_transaction_barrier");
+    if(ite_enable_transaction_barrier!=conf.end()){
+        enable_transaction_barrier_=true;
+    }
     info("proxy server working");
     //std::thread* tmp = new std::thread(&ProxyServerImpl::backend_update, this);
     update_thr_ = std::make_shared<std::thread>(&ProxyServerImpl::backend_update, this);
@@ -173,7 +177,7 @@ Status ProxyServerImpl::GetConfig(ServerContext* context, const GetConfigRequest
     return grpc::Status{grpc::StatusCode::OK, ""};
 }
 
-Status ProxyServerImpl::Transaction(ServerContext* context, const TransactionRequest* req, TransactionReply* reply){
+Status ProxyServerImpl::Transaction(ServerContext* context, const TransactionRequest* req, TransactionReply* rsp){
     //希望多个值，要么进行修改，要么就全部回滚
     //不给支持设置超时
     debug("get transaction...");
@@ -190,22 +194,16 @@ Status ProxyServerImpl::Transaction(ServerContext* context, const TransactionReq
     }
     //把相关key都上锁
     std::map<int, std::vector<int>> pos_keys;
-    {
-        //对需要的key等待1ms，超过5ms没有拿到所有锁就离开
-        int count = 5;
-        std::unique_lock<std::mutex> w_lock(lock_for_transaction_keys_);
-        bool lock_flag = true;
-        w_lock.unlock();
-        for(auto i = 0 ;i<keys.size();i++){
-            int tmp_pos = pos_list[i];
-            pos_keys[tmp_pos].push_back(i);
-            auto& key = keys[i];
-            //debug("get {} key {} ", i, key);
+    //对需要的key等待1ms，超过5ms没有拿到所有锁就离开
+    for(auto i = 0 ;i<keys.size();i++){
+        int tmp_pos = pos_list[i];
+        pos_keys[tmp_pos].push_back(i);
+        auto& key = keys[i];
+        //debug("get {} key {} ", i, key);
+        if(enable_transaction_barrier_){
+            int count = 5;
             do{
-                if(lock_flag){
-                    w_lock.lock();
-                    lock_flag=false;
-                }
+                std::unique_lock<std::mutex> w_lock(lock_for_transaction_keys_);
                 auto ite= keys_occupied_.find(key);
                 if(ite==keys_occupied_.end()){
                     keys_occupied_.insert(key);
@@ -214,7 +212,6 @@ Status ProxyServerImpl::Transaction(ServerContext* context, const TransactionReq
                 }else{
                     //释放锁,sleep,重试
                     w_lock.unlock();
-                    lock_flag = true;
                     count--;
                     //debug("insert failed key {} count {}", key, count);
                     if(count == 0 ){
@@ -239,6 +236,7 @@ Status ProxyServerImpl::Transaction(ServerContext* context, const TransactionReq
         std::map<int, TransactionStepReply> step_rsps;
         std::map<int, KV_client_ptr> clients;
         {
+            //debug("key size {}", pos_keys.size());
             std::unique_lock<std::mutex> w_lock(lock_for_client_);
             for(auto& pair :pos_keys){
                 TransactionStepRequest step_req;
@@ -248,20 +246,22 @@ Status ProxyServerImpl::Transaction(ServerContext* context, const TransactionReq
                     return grpc::Status{grpc::StatusCode::ABORTED, "can't find client of pos " + std::to_string(pair.first)};
                 }else{
                     if(clients.find(pair.first)==clients.end()){
-                        debug("add client for {} ", pair.first);
+                        //debug("add client for {} ", pair.first);
                         clients[pair.first]=ite->second;
                     }
                 }
                 for(auto& pos:pair.second){
                     step_req.add_keys(keys[pos]);
                     step_req.add_values(values[pos]);
+                    //TODO::这里最好和前面两行统一
+                    step_req.add_operation_id(req->operation_id(pos));
                 }
                 //TODO::step_id使用enum class 会更加合适
                 step_req.set_step_id(1);
-                step_req.set_req_id(req->req_id());
                 step_reqs.insert({pair.first, std::move(step_req)});
                 step_rsps.insert({pair.first, TransactionStepReply{}});
             }
+            //debug("req size {}", step_reqs.size());
         }
         //序列化调用 prepare 接口，当然更好的方式是并行
         for(auto& pair:clients){
@@ -313,6 +313,10 @@ Status ProxyServerImpl::Transaction(ServerContext* context, const TransactionReq
                     debug("reqid {} to pos {} step {} errormsg {}", req->req_id(), pos, step_count, status.error_message());
                 }else{
                     debug("reqid {} to pos {} step {} success", req->req_id(), pos, step_count);
+                    for(auto i=0;i<step_rsp.keys_size();i++){
+                        rsp->add_keys(step_rsp.keys(i));
+                        rsp->add_values(step_rsp.values(i));
+                    }
                 }
             }
             if(count != clients.size()){
@@ -342,23 +346,23 @@ Status ProxyServerImpl::Transaction(ServerContext* context, const TransactionReq
             debug("req_id {} to pos {} start to ROLLBACK", req->req_id(), pos);
         }
         debug("req_id {} transacton rollbacked ", req->req_id());
-}while(false);
+    }while(false);
 
-//结束，释放对于key的锁
-{
-    std::unique_lock<std::mutex> w_lock(lock_for_transaction_keys_);
-    for(auto& key:keys){
-        //auto ite= keys_occupied.find(key);
-        keys_occupied_.erase(key);
+    //结束，释放对于key的锁
+    if(enable_transaction_barrier_){
+        std::unique_lock<std::mutex> w_lock(lock_for_transaction_keys_);
+        for(auto& key:keys){
+            //auto ite= keys_occupied.find(key);
+            keys_occupied_.erase(key);
+        }
+        debug("release keys in transaction");
     }
-    debug("release keys in transaction");
-}
-debug("req {} finish at step count {}", req->req_id(), step_count);
-if(success_flag){
-    return {grpc::StatusCode::OK, "get keys lock timeout"};
-}else{
-    return {grpc::StatusCode::ABORTED, "error at phase "+std::to_string(step_count)};
-}
+    debug("req {} finish at step count {}", req->req_id(), step_count);
+    if(success_flag){
+        return {grpc::StatusCode::OK, "get keys lock timeout"};
+    }else{
+        return {grpc::StatusCode::ABORTED, "error at phase "+std::to_string(step_count)};
+    }
 }
 
 void ProxyServerImpl::backend_update(){

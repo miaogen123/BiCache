@@ -251,7 +251,7 @@ public:
     return 0;
   }
 
-  int Transaction(const std::vector<std::string>& keys, const std::vector<std::string>& values){
+  int Transaction(const std::vector<std::string>& keys, const std::vector<std::string>& values, std::vector<uint32_t> operation_ids){
     //提交事务
     if(keys.size()!=values.size()){
       critical("transaction input with diff length:{} {}",keys.size(), values.size());
@@ -261,6 +261,7 @@ public:
     Bicache::TransactionReply rsp;
     req.set_req_id(getRandomInt());
     for(auto i =0 ;i<keys.size();i++){
+      req.add_operation_id(operation_ids[i]);
       req.add_keys(keys[i]);
       req.add_values(values[i]);
     }
@@ -269,6 +270,8 @@ public:
     if(!status.ok()){
       warn("reqid {} transaction failed with msg:{}", req.req_id(), status.error_message());
       return -1;
+    }else{
+      debug("transaction commited");
     }
     return 0;
   }

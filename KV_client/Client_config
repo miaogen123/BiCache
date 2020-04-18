@@ -3,3 +3,4 @@ proxy_port 7790
 expire_time 0
 read_backup true
 read_limit 90
+test_read_transaction 0

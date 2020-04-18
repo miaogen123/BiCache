@@ -59,7 +59,6 @@ int main(int argc, char** argv) {
   KV_client kvc(conf);
   kvc.GetTology();
   
-
   std::vector<std::string> keys;
   std::vector<std::string> values;
 

@@ -82,9 +82,12 @@ message TransactionRequest{
   uint64 req_id = 1;
   repeated string keys = 2;
   repeated string values = 3;
+  repeated uint32 operation_id = 4;
 }
 
 message TransactionReply{
   //0 success, 1 failed
   uint32 status = 1;
+  repeated string keys = 2;
+  repeated string values = 3;
 }

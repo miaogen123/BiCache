@@ -112,6 +112,14 @@ int KV_store_impl::is_valid(uint64_t& timestamp, int& req_id, uint64_t& key_pos,
     std::shared_lock<std::shared_mutex> r_lock(backup_.lock);
     auto backup_cache = backup_.backup_cache;
     auto ite = backup_cache.find(key);
+    //判断是否是事务-不判断了
+    //std::shared_lock<std::shared_mutex> w_lock_for_trans(rw_lock_for_trans_);
+    //if(keys_in_trans_.find(key)!=keys_in_trans_.end()){
+    //  debug("key {} op aborted because the key is in transactions");
+    //  return {grpc::StatusCode::ABORTED, "key in in transaction"};
+    //}
+    //w_lock_for_trans.unlock();
+
     if(ite==backup_cache.end()){
       rsp->set_value("");
     }else if(ite->second.first < get_miliseconds()){
@@ -257,7 +265,9 @@ void KV_store_impl::release_resource_in_transaction(int req_id){
     auto pos = MurmurHash64B(req->keys(i).c_str(), req->keys(i).size())%virtual_node_num_;
     if(ch_node_->in_range(pos)){
       single_trans.keys.push_back(req->keys(i));
-      single_trans.values.push_back(req->values(i));
+      single_trans.operation_id.push_back(req->operation_id(i));
+      if(req->operation_id(i)==0)
+        single_trans.values.push_back(req->values(i));
     }else{
       debug("KV:trans aborted becauseof key {} not in my range");
       release_resource_in_transaction(req->req_id());
@@ -292,10 +302,21 @@ void KV_store_impl::release_resource_in_transaction(int req_id){
   w_lock_to_check.unlock();
   int count=0;
   //TODO::should write with rw_lock
+  std::string value_to_ret("");
   for(auto i=0;i<ite->second.keys.size();i++){
     auto key = ite->second.keys[i];
     auto value = ite->second.values[i];
-    inner_cache_.insert({key, std::make_pair<uint64_t, std::string>(std::numeric_limits<uint64_t>::max(), std::move(value))});
+    auto operation_id = ite->second.operation_id[i];
+    if(0==operation_id){
+      inner_cache_.insert({key, std::make_pair<uint64_t, std::string>(std::numeric_limits<uint64_t>::max(), std::move(value))});
+    }else{
+      auto ite_to_ret=inner_cache_.find(key);
+      if(ite_to_ret!=inner_cache_.end()){
+        value_to_ret=ite_to_ret->second.second;
+      }
+      rsp->add_keys(key);
+      rsp->add_values(value_to_ret);
+    }
     count++;
   }
   debug("req_id {} update {} keys", ite->first, count);

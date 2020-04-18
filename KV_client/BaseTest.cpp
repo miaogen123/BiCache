@@ -113,7 +113,10 @@ int main(int argc, char** argv) {
 
       SplitString(keys_one_line, keys, ' ');
       SplitString(values_one_line, values, ' ');
-      kvc.Transaction(keys, values);
+      std::vector<uint32_t> operation_ids;
+      operation_ids.resize(keys.size());
+      debug("kes {} values {}", keys.size(), values.size());
+      kvc.Transaction(keys, values, operation_ids);
     }
     if(input_value !=4){
       std::cin>>input_value;
